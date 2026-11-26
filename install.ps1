@@ -25,7 +25,7 @@ $existing = Get-Content -Path $PROFILE -Raw -ErrorAction SilentlyContinue
 if ($existing -and $existing.Contains("powershell\cue.ps1")) {
     Write-Host "  ✓ Already configured in $PROFILE" -ForegroundColor Green
 } else {
-    Add-Content -Path $PROFILE -Value "`n# cue — Smart AI PowerShell autocomplete & error-fix assistant`n$sourceLine"
+    Add-Content -Path $PROFILE -Value "`n# cue - Smart AI PowerShell autocomplete & error-fix assistant`n$sourceLine"
     Write-Host "  ✓ Added cue loader to $PROFILE" -ForegroundColor Green
 }
 

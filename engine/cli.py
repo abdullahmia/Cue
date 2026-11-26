@@ -883,7 +883,7 @@ def cmd_settings(args: argparse.Namespace) -> int:
             return _settings_choose_model(theme, cfg)
         if action == "token":
             cur_key = str(cfg.get("openrouter_api_key", ""))
-            sub_hint = "Current key set — enter new key below" if cur_key else "Get free key at https://openrouter.ai/keys"
+            sub_hint = "Current key set (enter new key below)" if cur_key else "Get free key at https://openrouter.ai/keys"
             new_key = tui_input_card(
                 theme,
                 "OpenRouter API Token",
@@ -1040,8 +1040,11 @@ def uninstall_cue_plugin(
         "tawh.plugin.zsh",
         "bash/cue.bash",
         "bash/tawh.bash",
-        "# cue — Smart AI",
-        "# tawh — Smart AI",
+        "# cue - Smart AI",
+        "# tawh - Smart AI",
+        "Smart AI Zsh autocomplete",
+        "Smart AI Bash autocomplete",
+        "Smart AI PowerShell autocomplete",
         "powershell\\cue.ps1",
         "powershell/cue.ps1",
     )

@@ -64,14 +64,14 @@ if command -v zsh >/dev/null 2>&1; then
     rm -f "$OMZ_CUSTOM/plugins/tawh"
   fi
   if grep -Fq "tawh.plugin.zsh" "$ZSHRC"; then
-    grep -v -E "tawh\.plugin\.zsh|# tawh —" "$ZSHRC" > "${ZSHRC}.cue.tmp" && mv "${ZSHRC}.cue.tmp" "$ZSHRC"
+    grep -v -E "tawh\.plugin\.zsh|# tawh .*Smart AI" "$ZSHRC" > "${ZSHRC}.cue.tmp" && mv "${ZSHRC}.cue.tmp" "$ZSHRC"
   fi
   if grep -Fq "cue.plugin.zsh" "$ZSHRC"; then
     echo "  ✓ Zsh already configured in $ZSHRC"
   else
     {
       echo ""
-      echo "# cue — Smart AI Zsh autocomplete & project history"
+      echo "# cue - Smart AI Zsh autocomplete & project history"
       echo "$SOURCE_LINE"
     } >> "$ZSHRC"
     echo "  ✓ Added Zsh plugin source line to $ZSHRC"
@@ -87,7 +87,7 @@ if command -v bash >/dev/null 2>&1; then
     else
       {
         echo ""
-        echo "# cue — Smart AI Bash autocomplete & error-fix assistant"
+        echo "# cue - Smart AI Bash autocomplete & error-fix assistant"
         echo "source \"$CUE_DIR/bash/cue.bash\""
       } >> "$BASHRC"
       echo "  ✓ Added Bash adapter source line to $BASHRC"

@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cue: Smart AI Zsh Autocomplete & Project History Dropdown</title>
+  <meta name="description" content="Smart AI Zsh autocomplete & project history dropdown with inline ghost text, auto error-fix suggestions, and OpenRouter :free model fallback." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+            mono: ['JetBrains Mono', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+          colors: {
+            shell: {
+              bg: '#0d1117',
+              card: '#161b22',
+              term: '#1b222a',
+              border: '#2b3440',
+            }
+          },
+          animation: {
+            'float-slow': 'floatSlow 7s ease-in-out infinite',
+            'pulse-soft': 'pulseSoft 3.5s ease-in-out infinite',
+            'blink': 'blink 1.05s step-end infinite',
+          },
+          keyframes: {
+            floatSlow: {
+              '0%, 100%': { transform: 'translateY(0px)' },
+              '50%': { transform: 'translateY(-6px)' },
+            },
+            pulseSoft: {
+              '0%, 100%': { opacity: '0.45' },
+              '50%': { opacity: '0.8' },
+            },
+            blink: {
+              '0%, 100%': { opacity: '1' },
+              '50%': { opacity: '0' },
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    html, body {
+      max-width: 100%;
+      overflow-x: clip;
+      background-color: #0d1117;
+      color: #e6edf3;
+    }
+    .grid-backdrop {
+      background-image:
+        linear-gradient(to right, rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes auroraDriftA {
+      0%, 100% { transform: translate(-50%, 0px) scale(1); opacity: 0.45; }
+      50% { transform: translate(-44%, 26px) scale(1.08); opacity: 0.72; }
+    }
+    @keyframes auroraDriftB {
+      0%, 100% { transform: translate(0px, 0px) scale(1); opacity: 0.25; }
+      50% { transform: translate(-30px, -24px) scale(1.12); opacity: 0.45; }
+    }
+    @keyframes shimmerText {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+    @keyframes panelIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.992); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateX(-6px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .hero-enter {
+      opacity: 0;
+      animation: fadeSlideUp 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .aurora-a { animation: auroraDriftA 9s ease-in-out infinite; }
+    .aurora-b { animation: auroraDriftB 11s ease-in-out infinite; }
+    .gradient-shimmer {
+      background-size: 200% auto;
+      animation: shimmerText 5s ease infinite;
+    }
+    .panel-animate {
+      animation: panelIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .row-animate {
+      animation: rowIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .reveal {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1), transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .hero-enter, .reveal { opacity: 1; transform: none; }
+    }
+    /* Crisp scrollbar for code blocks */
+    pre::-webkit-scrollbar { height: 6px; }
+    pre::-webkit-scrollbar-thumb { background: #30363d; border-radius: 9999px; }
+  </style>
+</head>
+<body class="font-sans antialiased selection:bg-cyan-500/30 selection:text-cyan-100">
+  <!-- Subtle animated ambient backdrop -->
+  <div class="fixed inset-0 grid-backdrop pointer-events-none -z-20"></div>
+  <div class="fixed top-[-180px] left-1/2 w-[780px] h-[420px] rounded-full bg-cyan-500/15 blur-[130px] pointer-events-none -z-10 aurora-a"></div>
+  <div class="fixed bottom-[-160px] right-[-120px] w-[520px] h-[360px] rounded-full bg-emerald-500/10 blur-[130px] pointer-events-none -z-10 aurora-b"></div>
+
+  <!-- Navbar -->
+  <header class="sticky top-0 z-40 border-b border-white/10 bg-[#0d1117]/80 backdrop-blur-xl">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <a href="#" class="flex items-center gap-2.5 group">
+        <span class="w-8 h-8 rounded-lg bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300 font-mono text-base group-hover:scale-105 transition-transform">✦</span>
+        <span class="font-mono font-bold text-lg tracking-tight text-white">cue</span>
+        <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400">v0.0.1</span>
+      </a>
+
+      <nav class="hidden md:flex items-center gap-7 text-sm text-slate-300">
+        <a href="#demo" class="hover:text-cyan-300 transition-colors">Interactive Demo</a>
+        <a href="#install" class="hover:text-cyan-300 transition-colors">Installation</a>
+        <a href="#screenshots" class="hover:text-cyan-300 transition-colors">Screenshots</a>
+        <a href="#commands" class="hover:text-cyan-300 transition-colors">Commands</a>
+      </nav>
+
+      <div class="flex items-center gap-2.5">
+        <a href="https://github.com/abdullahmia/Cue" target="_blank" rel="noreferrer" class="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-300 hover:text-white border border-white/10 hover:border-white/25 bg-white/[0.03] transition-all">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          GitHub
+        </a>
+        <a href="#install" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold bg-cyan-400 text-slate-950 hover:bg-cyan-300 shadow-[0_0_24px_rgba(34,211,238,0.28)] transition-all">
+          Install Cue
+          <span aria-hidden="true">→</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero + Interactive Terminal Simulator -->
+    <section id="demo" class="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-14">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+        <div class="lg:col-span-5 min-w-0 space-y-6">
+          <div class="hero-enter inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/25 text-cyan-300 text-xs font-medium" style="animation-delay:0ms">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            Zsh · Bash · PowerShell · Zero pip installs
+          </div>
+
+          <h1 class="hero-enter text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-[1.12]" style="animation-delay:80ms">
+            Smart AI autocomplete right inside your <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-emerald-300 to-sky-400 gradient-shimmer">terminal</span>.
+          </h1>
+
+          <p class="hero-enter text-slate-300 text-base sm:text-lg leading-relaxed" style="animation-delay:160ms">
+            <span class="font-mono text-cyan-300">cue</span> renders an inline ghost prompt and an interactive <kbd class="px-1.5 py-0.5 text-xs font-mono bg-white/10 rounded border border-white/15">↑</kbd>/<kbd class="px-1.5 py-0.5 text-xs font-mono bg-white/10 rounded border border-white/15">↓</kbd> dropdown from your project history, scripts, automatic error fixes, and OpenRouter <code class="text-cyan-300 font-mono text-sm">:free</code> AI models.
+          </p>
+
+          <!-- Quick install bar right in Hero -->
+          <div class="hero-enter rounded-xl border border-cyan-400/25 bg-[#161b22]/90 p-3 shadow-lg hover:border-cyan-400/45 transition-colors" style="animation-delay:240ms">
+            <div class="flex items-center justify-between gap-2 mb-1.5">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-cyan-300">One-Line Install</span>
+              <span class="text-[11px] text-slate-400">macOS &amp; Linux</span>
+            </div>
+            <div class="flex items-center justify-between gap-2 bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 min-w-0">
+              <code id="hero-cmd" class="font-mono text-xs sm:text-sm text-emerald-300 truncate min-w-0 flex-1">curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash</code>
+              <button data-copy-target="hero-cmd" class="copy-btn shrink-0 px-2.5 py-1 rounded-md text-xs font-medium bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-all active:scale-95">
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div class="hero-enter flex flex-wrap items-center gap-3 text-xs text-slate-400" style="animation-delay:320ms">
+            <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> Pure Python 3 stdlib</span>
+            <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> :free models only</span>
+            <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> Secret-filtered ~/.cue context</span>
+          </div>
+        </div>
+
+        <!-- Interactive Terminal Playground -->
+        <div class="lg:col-span-7 min-w-0 hero-enter" style="animation-delay:140ms">
+          <div class="rounded-2xl border border-[#2b3440] bg-[#1b222a] shadow-[0_24px_70px_rgba(0,0,0,0.65)] overflow-hidden animate-float-slow">
+            <!-- Window Chrome -->
+            <div class="h-9 px-3 sm:px-4 bg-[#222a33] border-b border-[#2d3640] flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <span class="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-[#ff5f56]"></span>
+                <span class="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-[#ffbd2e]"></span>
+                <span class="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-[#27c93f]"></span>
+              </div>
+              <span class="text-[11px] sm:text-xs text-slate-400 font-medium truncate">Interactive Preview <span class="hidden sm:inline">(Try ↑ / ↓ / Tab)</span></span>
+              <button id="btn-autoplay" type="button" class="shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 hover:bg-emerald-500/25 transition-all">
+                <span id="autoplay-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span id="autoplay-label">Auto</span>
+              </button>
+            </div>
+
+            <!-- Interactive Scenario Switcher -->
+            <div class="px-4 py-2.5 bg-[#151b22] border-b border-white/5 flex flex-wrap items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-slate-400 mr-1">Try scenario:</span>
+              <button data-sim="smart" class="sim-btn px-2.5 py-1 rounded-md text-xs font-medium bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 transition-all">Smart Dropdown</button>
+              <button data-sim="error" class="sim-btn px-2.5 py-1 rounded-md text-xs font-medium bg-white/5 text-slate-300 border border-white/10 hover:border-white/25 transition-all">Error Fix &amp; Retry</button>
+              <button data-sim="ask" class="sim-btn px-2.5 py-1 rounded-md text-xs font-medium bg-white/5 text-slate-300 border border-white/10 hover:border-white/25 transition-all">cue ask CLI</button>
+            </div>
+
+            <!-- Live Terminal Body -->
+            <div class="p-4 sm:p-5 font-mono text-xs sm:text-[13.5px] leading-relaxed min-h-[310px]" id="sim-container" tabindex="0">
+              <div id="sim-preoutput" class="hidden mb-2.5 text-rose-400"></div>
+              <div class="flex items-center flex-wrap gap-1.5 text-slate-200 mb-2">
+                <span class="text-slate-400">abdullah@Mac-mini</span>
+                <span class="text-sky-400 font-semibold">my-next-app</span>
+                <span class="text-slate-400">%</span>
+                <span id="sim-typed" class="text-emerald-300 font-semibold">pnpm </span><span class="inline-block w-2 h-4 bg-slate-200 align-middle animate-blink"></span><span id="sim-ghost" class="text-slate-500 -ml-1.5">dev</span>
+              </div>
+
+              <!-- Dropdown Card / CLI Output -->
+              <div id="sim-box" class="rounded-lg border border-[#3c4654] bg-[#161c23] overflow-hidden">
+                <div class="px-3 py-1.5 border-b border-[#2c3440] flex items-center justify-between text-xs bg-[#192028]">
+                  <div>
+                    <span class="text-cyan-300 font-bold">✦ cue</span>
+                    <span class="text-slate-400"> · </span>
+                    <span id="sim-mode" class="text-slate-200 font-semibold">SMART</span>
+                    <span class="text-slate-400 hidden sm:inline"> · Next.js, Node.js · qwen3-coder:free</span>
+                  </div>
+                  <span id="sim-counter" class="text-slate-400">[1/6]</span>
+                </div>
+                <div id="sim-error-banner" class="hidden px-3 py-1 bg-[#4c1111] text-rose-200 font-semibold border-b border-rose-500/30">
+                  ⚠ Exit 1: python3 -m pytest tests/test_cue_engine.py -v
+                </div>
+                <div id="sim-answer-banner" class="hidden px-3 py-1.5 bg-[#0f2e36] text-cyan-100 border-b border-cyan-500/30">
+                  ✦ <span id="sim-answer-text"></span>
+                </div>
+                <div id="sim-rows" class="divide-y divide-white/[0.03]"></div>
+                <div class="px-3 py-1.5 border-t border-[#2c3440] text-[11px] text-slate-400 bg-[#192028] flex flex-wrap justify-between gap-2">
+                  <span>↑/↓ select · Tab/→ fill · Enter run · ^Space AI</span>
+                  <div class="flex items-center gap-1.5">
+                    <button id="btn-sim-up" class="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-200">↑</button>
+                    <button id="btn-sim-down" class="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-200">↓</button>
+                    <button id="btn-sim-tab" class="px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-400 hover:text-slate-950 text-cyan-200 transition-colors">Tab fill</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works: 3 simple pillars -->
+    <section class="max-w-6xl mx-auto px-4 sm:px-6 py-10 reveal">
+      <div class="grid sm:grid-cols-3 gap-4">
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22]/80 p-5 hover:-translate-y-1 hover:border-cyan-400/40 hover:shadow-[0_12px_36px_rgba(34,211,238,0.08)] transition-all duration-300">
+          <div class="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 flex items-center justify-center font-mono mb-3">↺</div>
+          <h3 class="font-semibold text-white mb-1.5">Project-Scoped &amp; Instant</h3>
+          <p class="text-sm text-slate-400 leading-relaxed">Auto-detects Node, Python, Rust, Go, Makefile, &amp; Git branches silently on <code class="text-slate-300 font-mono">cd</code>. Recent commands (<span class="text-emerald-300 font-mono">max 3</span>) rank first via local TSV caches.</p>
+        </div>
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22]/80 p-5 hover:-translate-y-1 hover:border-cyan-400/40 hover:shadow-[0_12px_36px_rgba(34,211,238,0.08)] transition-all duration-300">
+          <div class="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 flex items-center justify-center font-mono mb-3">✦</div>
+          <h3 class="font-semibold text-white mb-1.5">OpenRouter :free AI</h3>
+          <p class="text-sm text-slate-400 leading-relaxed">Enforces <code class="text-cyan-300 font-mono">:free</code> models only (up to <span class="text-cyan-300 font-mono">12</span> AI suggestions), tracks model latency, and switches automatically on rate limits.</p>
+        </div>
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22]/80 p-5 hover:-translate-y-1 hover:border-cyan-400/40 hover:shadow-[0_12px_36px_rgba(34,211,238,0.08)] transition-all duration-300">
+          <div class="w-9 h-9 rounded-lg bg-rose-500/15 border border-rose-400/30 text-rose-300 flex items-center justify-center font-mono mb-3">⚠</div>
+          <h3 class="font-semibold text-white mb-1.5">Auto Error Fix &amp; Retry</h3>
+          <p class="text-sm text-slate-400 leading-relaxed">When a command fails, <span class="font-mono text-white">cue</span> shows a dimmed fix ghost right away. Press <kbd class="px-1 bg-white/10 rounded text-xs font-mono">Tab</kbd> to fix, then <kbd class="px-1 bg-white/10 rounded text-xs font-mono">Tab</kbd> again to retry your original command.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Focused Step-by-Step Installation Section -->
+    <section id="install" class="max-w-6xl mx-auto px-4 sm:px-6 py-14 reveal">
+      <div class="text-center max-w-2xl mx-auto mb-10">
+        <span class="text-xs font-mono uppercase tracking-widest text-cyan-300">Setup in under 30 seconds</span>
+        <h2 class="text-2xl sm:text-4xl font-bold text-white mt-2">Easy Step-by-Step Installation</h2>
+        <p class="text-slate-400 mt-3 text-sm sm:text-base">Choose your preferred install method below. No external Python dependencies (<code class="text-slate-300 font-mono">pip</code>) required: only Zsh (5.x+) and Python 3.</p>
+      </div>
+
+      <!-- Installer Method Tabs -->
+      <div class="rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl overflow-hidden">
+        <div class="border-b border-white/10 bg-[#12171e] px-4 py-3 flex flex-wrap gap-2" role="tablist">
+          <button data-install-tab="curl" class="install-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold bg-cyan-400 text-slate-950 transition-all">
+            One-Line (curl | bash)
+          </button>
+          <button data-install-tab="brew" class="install-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 transition-all">
+            Homebrew
+          </button>
+          <button data-install-tab="omz" class="install-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 transition-all">
+            Oh My Zsh / Zinit / Sheldon
+          </button>
+          <button data-install-tab="other" class="install-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 transition-all">
+            Windows PowerShell &amp; Bash
+          </button>
+        </div>
+
+        <!-- Tab Panels -->
+        <div class="p-5 sm:p-8">
+          <!-- Panel 1: curl | bash -->
+          <div id="panel-curl" class="install-panel space-y-6">
+            <div class="grid md:grid-cols-3 gap-5">
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-6 h-6 rounded-full bg-cyan-400/20 text-cyan-300 text-xs font-bold flex items-center justify-center">1</span>
+                    <h3 class="font-semibold text-white text-sm">Run the installer</h3>
+                  </div>
+                  <p class="text-xs text-slate-400 mb-3">Clones into <code class="text-slate-300 font-mono">~/.local/share/cue</code>, adds <code class="text-slate-300 font-mono">cue</code> to PATH, and hooks into <code class="text-slate-300 font-mono">~/.zshrc</code>.</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">bash / zsh</span>
+                    <button data-copy-target="code-curl-1" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-curl-1" class="font-mono text-xs text-emerald-300 overflow-x-auto p-3">curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-6 h-6 rounded-full bg-cyan-400/20 text-cyan-300 text-xs font-bold flex items-center justify-center">2</span>
+                    <h3 class="font-semibold text-white text-sm">Reload your shell</h3>
+                  </div>
+                  <p class="text-xs text-slate-400 mb-3">Applies the ZLE keybindings &amp; hooks right away (or open a new terminal tab).</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">zsh</span>
+                    <button data-copy-target="code-curl-2" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-curl-2" class="font-mono text-xs text-cyan-300 overflow-x-auto p-3">source ~/.zshrc</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-6 h-6 rounded-full bg-emerald-400/20 text-emerald-300 text-xs font-bold flex items-center justify-center">3</span>
+                    <h3 class="font-semibold text-white text-sm">Complete quick onboarding</h3>
+                  </div>
+                  <p class="text-xs text-slate-400 mb-3">Paste a free <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" class="text-cyan-300 underline">OpenRouter key</a> (or press Enter to skip for offline mode). Configure anytime later:</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">cli</span>
+                    <button data-copy-target="code-curl-3" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-curl-3" class="font-mono text-xs text-slate-200 overflow-x-auto p-3">cue settings</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 2: Homebrew -->
+          <div id="panel-brew" class="install-panel hidden space-y-6">
+            <div class="grid md:grid-cols-3 gap-5">
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-6 h-6 rounded-full bg-cyan-400/20 text-cyan-300 text-xs font-bold flex items-center justify-center">1</span>
+                    <h3 class="font-semibold text-white text-sm">Tap &amp; install via Homebrew</h3>
+                  </div>
+                  <p class="text-xs text-slate-400 mb-3">Installs directly from the single <code class="text-slate-300 font-mono">abdullahmia/Cue</code> repository formula.</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">homebrew</span>
+                    <button data-copy-target="code-brew-1" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-brew-1" class="font-mono text-xs text-emerald-300 overflow-x-auto p-3">brew tap abdullahmia/cue https://github.com/abdullahmia/Cue.git
+brew install abdullahmia/cue/cue-zsh</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-6 h-6 rounded-full bg-cyan-400/20 text-cyan-300 text-xs font-bold flex items-center justify-center">2</span>
+                    <h3 class="font-semibold text-white text-sm">Enable in ~/.zshrc</h3>
+                  </div>
+                  <p class="text-xs text-slate-400 mb-3">Zsh plugins must be sourced in <code class="text-slate-300 font-mono">~/.zshrc</code> so line-editor widgets bind cleanly.</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">zsh</span>
+                    <button data-copy-target="code-brew-2" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-brew-2" class="font-mono text-xs text-cyan-300 overflow-x-auto p-3">echo 'source "$(brew --prefix)/opt/cue-zsh/share/cue-zsh/cue.plugin.zsh"' &gt;&gt; ~/.zshrc
+source ~/.zshrc</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-6 h-6 rounded-full bg-emerald-400/20 text-emerald-300 text-xs font-bold flex items-center justify-center">3</span>
+                    <h3 class="font-semibold text-white text-sm">Update or verify anytime</h3>
+                  </div>
+                  <p class="text-xs text-slate-400 mb-3">Upgrade seamlessly with Homebrew whenever new releases ship.</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">upgrade</span>
+                    <button data-copy-target="code-brew-3" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-brew-3" class="font-mono text-xs text-slate-200 overflow-x-auto p-3">brew update &amp;&amp; brew upgrade cue-zsh</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 3: Oh My Zsh / Zinit / Sheldon -->
+          <div id="panel-omz" class="install-panel hidden space-y-4">
+            <div class="grid md:grid-cols-3 gap-5">
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <h3 class="font-semibold text-white text-sm mb-2">Oh My Zsh</h3>
+                  <p class="text-xs text-slate-400 mb-3">Clone into custom plugins, then add <code class="text-cyan-300 font-mono">cue</code> to <code class="text-slate-300 font-mono">plugins=(...)</code>:</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">zsh</span>
+                    <button data-copy-target="code-omz" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-omz" class="font-mono text-xs text-emerald-300 overflow-x-auto p-3">git clone https://github.com/abdullahmia/Cue.git "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/cue"</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <h3 class="font-semibold text-white text-sm mb-2">Zinit</h3>
+                  <p class="text-xs text-slate-400 mb-3">Add this line inside your <code class="text-slate-300 font-mono">~/.zshrc</code>:</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">~/.zshrc</span>
+                    <button data-copy-target="code-zinit" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-zinit" class="font-mono text-xs text-cyan-300 overflow-x-auto p-3">zinit light abdullahmia/Cue</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <h3 class="font-semibold text-white text-sm mb-2">Sheldon</h3>
+                  <p class="text-xs text-slate-400 mb-3">Add to <code class="text-slate-300 font-mono">~/.config/sheldon/plugins.toml</code>:</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">plugins.toml</span>
+                    <button data-copy-target="code-sheldon" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-sheldon" class="font-mono text-xs text-amber-200 overflow-x-auto p-3">[plugins.cue]
+github = "abdullahmia/Cue"</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 4: Windows PowerShell & Bash -->
+          <div id="panel-other" class="install-panel hidden space-y-4">
+            <div class="grid md:grid-cols-2 gap-5">
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <h3 class="font-semibold text-white text-sm mb-2">Windows PowerShell (5.1 &amp; pwsh)</h3>
+                  <p class="text-xs text-slate-400 mb-3">Adds <code class="text-slate-300 font-mono">cue.ps1</code> to your PowerShell <code class="text-slate-300 font-mono">$PROFILE</code>:</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">powershell</span>
+                    <button data-copy-target="code-ps" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-ps" class="font-mono text-xs text-cyan-300 overflow-x-auto p-3">git clone https://github.com/abdullahmia/Cue.git $HOME\cue
+cd $HOME\cue
+.\install.ps1</pre>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
+                <div>
+                  <h3 class="font-semibold text-white text-sm mb-2">Bash (macOS / Linux / Git Bash)</h3>
+                  <p class="text-xs text-slate-400 mb-3">Source the Bash adapter in <code class="text-slate-300 font-mono">~/.bashrc</code>:</p>
+                </div>
+                <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
+                    <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">bash</span>
+                    <button data-copy-target="code-bash" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
+                  </div>
+                  <pre id="code-bash" class="font-mono text-xs text-emerald-300 overflow-x-auto p-3">source ~/.local/share/cue/bash/cue.bash</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Screenshots Showcase -->
+    <section id="screenshots" class="max-w-6xl mx-auto px-4 sm:px-6 py-12 reveal">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+        <div>
+          <span class="text-xs font-mono uppercase tracking-widest text-cyan-300">Visual Tour</span>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white mt-1.5">See Cue in Action</h2>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button data-shot="0" class="shot-tab px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-400/20 text-cyan-200 border border-cyan-400/40 transition-all">Smart Dropdown</button>
+          <button data-shot="1" class="shot-tab px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-slate-300 border border-white/10 hover:border-white/25 transition-all">Error Diagnosis</button>
+          <button data-shot="2" class="shot-tab px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-slate-300 border border-white/10 hover:border-white/25 transition-all">Interactive Settings</button>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-white/10 bg-[#161b22] p-4 sm:p-6 shadow-xl">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+          <div class="lg:col-span-8 min-w-0">
+            <button id="shot-zoom-btn" type="button" class="group relative block w-full text-left rounded-xl overflow-hidden border border-white/10 bg-[#0d1117] focus:outline-none focus:ring-2 focus:ring-cyan-400">
+              <img
+                id="shot-img"
+                src="../assets/smart-dropdown.png"
+                data-fallback="https://raw.githubusercontent.com/abdullahmia/Cue/main/assets/smart-dropdown.png"
+                onerror="if(!this.dataset.fb){this.dataset.fb='1';this.src=this.dataset.fallback;}"
+                alt="cue Smart ZLE Autocomplete & Dropdown"
+                class="w-full h-auto transition-transform duration-300 group-hover:scale-[1.01]"
+              />
+              <span class="absolute bottom-3 right-3 px-2.5 py-1 rounded-md text-[11px] font-medium bg-black/70 text-slate-200 border border-white/15 opacity-0 group-hover:opacity-100 transition-opacity">Click to zoom</span>
+            </button>
+          </div>
+          <div class="lg:col-span-4 min-w-0 space-y-4">
+            <span id="shot-badge" class="inline-block px-2.5 py-1 rounded-md text-xs font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-400/30">ZLE Autocomplete</span>
+            <h3 id="shot-title" class="text-xl font-bold text-white">Inline Ghost Text &amp; Ranked Dropdown</h3>
+            <p id="shot-desc" class="text-sm text-slate-300 leading-relaxed">
+              Type any command prefix to see dimmed inline completion and a crisp box showing project recent commands (max 3), AI suggestions (max 12), project scripts, and shell history.
+            </p>
+            <ul id="shot-bullets" class="space-y-2 text-xs text-slate-300">
+              <li class="flex items-center gap-2"><span class="text-emerald-400">✓</span> Press <kbd class="px-1.5 py-0.5 font-mono bg-white/10 rounded">Tab</kbd> or <kbd class="px-1.5 py-0.5 font-mono bg-white/10 rounded">→</kbd> to fill inline ghost text</li>
+              <li class="flex items-center gap-2"><span class="text-emerald-400">✓</span> Use <kbd class="px-1.5 py-0.5 font-mono bg-white/10 rounded">↑</kbd>/<kbd class="px-1.5 py-0.5 font-mono bg-white/10 rounded">↓</kbd> to pick and <kbd class="px-1.5 py-0.5 font-mono bg-white/10 rounded">Enter</kbd> to run</li>
+              <li class="flex items-center gap-2"><span class="text-emerald-400">✓</span> Sizes smoothly up to ~70% of terminal height</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Keybindings & CLI Reference -->
+    <section id="commands" class="max-w-6xl mx-auto px-4 sm:px-6 py-12 reveal">
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Keybindings Card -->
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-6 hover:border-cyan-400/30 transition-colors">
+          <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <span class="text-cyan-300 font-mono">⌘</span> Essential Keybindings
+          </h3>
+          <div class="space-y-2.5 text-sm">
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-slate-300">Open smart dropdown / move down</span>
+              <kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-cyan-300">↓</kbd>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-slate-300">Open history-first dropdown / move up</span>
+              <kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-cyan-300">↑</kbd>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-slate-300">Accept inline ghost text or fill item</span>
+              <div class="flex gap-1"><kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-emerald-300">Tab</kbd><kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-emerald-300">→</kbd></div>
+            </div>
+            <div class="flex items-center justify-between py-2 border-b border-white/5">
+              <span class="text-slate-300">Trigger instant OpenRouter AI refresh</span>
+              <kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-cyan-300">Ctrl+Space</kbd>
+            </div>
+            <div class="flex items-center justify-between py-2">
+              <span class="text-slate-300">Dismiss dropdown</span>
+              <div class="flex gap-1"><kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-slate-300">Esc</kbd><kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-slate-300">Ctrl+G</kbd></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CLI Commands Card -->
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-6 hover:border-emerald-400/30 transition-colors">
+          <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <span class="text-emerald-300 font-mono">$</span> Everyday CLI Commands
+          </h3>
+          <div class="space-y-2.5 text-sm">
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
+              <code class="font-mono text-xs text-cyan-300">cue ask "what is the version?"</code>
+              <span class="text-xs text-slate-400 text-right">Ask AI &amp; get runnable commands</span>
+            </div>
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
+              <code class="font-mono text-xs text-cyan-300">cue prompt "find large logs"</code>
+              <span class="text-xs text-slate-400 text-right">Translate task to shell commands</span>
+            </div>
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
+              <code class="font-mono text-xs text-emerald-300">cue settings</code>
+              <span class="text-xs text-slate-400 text-right">Interactive TUI settings menu</span>
+            </div>
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
+              <code class="font-mono text-xs text-slate-200">cue status · cue models</code>
+              <span class="text-xs text-slate-400 text-right">Check active :free model &amp; storage</span>
+            </div>
+            <div class="flex items-center justify-between gap-3 py-2">
+              <code class="font-mono text-xs text-rose-300">cue uninstall</code>
+              <span class="text-xs text-slate-400 text-right">Cleanly remove hooks &amp; data</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/10 mt-8">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+      <div class="flex items-center gap-2">
+        <span class="text-cyan-300 font-mono">✦ cue</span>
+        <span>· Smart AI Zsh Autocomplete &amp; Project History Dropdown</span>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="https://github.com/abdullahmia/Cue" target="_blank" rel="noreferrer" class="hover:text-white transition-colors">GitHub</a>
+        <a href="#install" class="hover:text-white transition-colors">Install</a>
+        <a href="#screenshots" class="hover:text-white transition-colors">Screenshots</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Lightbox Modal -->
+  <div id="lightbox" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+    <button id="lightbox-close" type="button" class="absolute top-4 right-4 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium">Esc / Close</button>
+    <img id="lightbox-img" src="" alt="Expanded cue screenshot" class="max-w-5xl w-full h-auto rounded-xl border border-white/20 shadow-2xl" />
+  </div>
+
+  <script>
+    // Copy to clipboard buttons
+    document.querySelectorAll('.copy-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const target = document.getElementById(btn.dataset.copyTarget);
+        if (!target) return;
+        try {
+          await navigator.clipboard.writeText(target.textContent.trim());
+          const prev = btn.textContent;
+          btn.textContent = '✓ Copied';
+          btn.classList.add('bg-emerald-400', 'text-slate-950');
+          setTimeout(() => {
+            btn.textContent = prev;
+            btn.classList.remove('bg-emerald-400', 'text-slate-950');
+          }, 1600);
+        } catch {
+          btn.textContent = 'Copy manually';
+        }
+      });
+    });
+
+    // Installation Tab Switcher
+    const installTabs = document.querySelectorAll('.install-tab');
+    const installPanels = document.querySelectorAll('.install-panel');
+    installTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const id = tab.dataset.installTab;
+        installTabs.forEach((t) => {
+          const active = t === tab;
+          t.className = active
+            ? 'install-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold bg-cyan-400 text-slate-950 transition-all'
+            : 'install-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 transition-all';
+        });
+        installPanels.forEach((p) => {
+          p.classList.toggle('hidden', p.id !== `panel-${id}`);
+        });
+      });
+    });
+
+    // Screenshot Showcase Switcher + Lightbox
+    const shots = [
+      {
+        src: '../assets/smart-dropdown.png',
+        fallback: 'https://raw.githubusercontent.com/abdullahmia/Cue/main/assets/smart-dropdown.png',
+        badge: 'ZLE Autocomplete',
+        title: 'Inline Ghost Text & Ranked Dropdown',
+        desc: 'Type any command prefix to see dimmed inline completion and a crisp box showing project recent commands (max 3), AI suggestions (max 12), project scripts, and shell history.',
+        bullets: [
+          'Press Tab or → to fill inline ghost text',
+          'Use ↑ / ↓ to select and Enter to run',
+          'Clean POSTDISPLAY rendering without cluttering scrollback',
+        ],
+      },
+      {
+        src: '../assets/error-fix-dropdown.png',
+        fallback: 'https://raw.githubusercontent.com/abdullahmia/Cue/main/assets/error-fix-dropdown.png',
+        badge: 'Auto Error Fix',
+        title: 'Instant Failure Diagnosis & Post-Fix Retry',
+        desc: 'When a command fails, cue diagnoses missing modules, bad permissions, or tool errors in milliseconds and offers a dimmed inline fix command plus automatic retry afterwards.',
+        bullets: [
+          'Instant offline diagnosis for common CLI failures',
+          'Enriched asynchronously with OpenRouter :free AI fixes',
+          'Auto-suggests your original failed command after the fix succeeds',
+        ],
+      },
+      {
+        src: '../assets/settings-tui.png',
+        fallback: 'https://raw.githubusercontent.com/abdullahmia/Cue/main/assets/settings-tui.png',
+        badge: 'cue settings',
+        title: 'Interactive Terminal UI Settings',
+        desc: 'Manage your preferred OpenRouter :free model, rotate API keys, inspect stored project contexts, prune stale folders, or cleanly uninstall with arrow-key navigation.',
+        bullets: [
+          'Instant save on every change with no messy manual config edits',
+          'Multi-select project cleanup with Ctrl+C safe exit handling',
+          'Tracks ~/.cue (or ~/.cuee fallback) size caps automatically',
+        ],
+      },
+    ];
+
+    let activeShot = 0;
+    const shotImg = document.getElementById('shot-img');
+    const shotBadge = document.getElementById('shot-badge');
+    const shotTitle = document.getElementById('shot-title');
+    const shotDesc = document.getElementById('shot-desc');
+    const shotBullets = document.getElementById('shot-bullets');
+    const shotTabs = document.querySelectorAll('.shot-tab');
+
+    function setShot(idx) {
+      activeShot = idx;
+      const s = shots[idx];
+      shotImg.dataset.fb = '';
+      shotImg.dataset.fallback = s.fallback;
+      shotImg.src = s.src;
+      shotImg.alt = s.title;
+      shotImg.classList.remove('panel-animate');
+      void shotImg.offsetWidth;
+      shotImg.classList.add('panel-animate');
+      shotBadge.textContent = s.badge;
+      shotTitle.textContent = s.title;
+      shotDesc.textContent = s.desc;
+      shotBullets.innerHTML = s.bullets
+        .map((b) => `<li class="flex items-center gap-2"><span class="text-emerald-400">✓</span><span>${b}</span></li>`)
+        .join('');
+      shotTabs.forEach((t, i) => {
+        t.className = i === idx
+          ? 'shot-tab px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-400/20 text-cyan-200 border border-cyan-400/40 transition-all'
+          : 'shot-tab px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-slate-300 border border-white/10 hover:border-white/25 transition-all';
+      });
+    }
+
+    shotTabs.forEach((btn) => {
+      btn.addEventListener('click', () => setShot(Number(btn.dataset.shot)));
+    });
+
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    document.getElementById('shot-zoom-btn').addEventListener('click', () => {
+      lightboxImg.src = shotImg.currentSrc || shotImg.src;
+      lightbox.classList.remove('hidden');
+      lightbox.classList.add('flex');
+    });
+    document.getElementById('lightbox-close').addEventListener('click', () => {
+      lightbox.classList.add('hidden');
+      lightbox.classList.remove('flex');
+    });
+    lightbox.addEventListener('click', (e) => {
+      if (e.target === lightbox) {
+        lightbox.classList.add('hidden');
+        lightbox.classList.remove('flex');
+      }
+    });
+
+    // Interactive Terminal Simulator
+    const scenarios = {
+      smart: {
+        pre: '',
+        typed: 'pnpm ',
+        mode: 'SMART',
+        errBanner: false,
+        answer: '',
+        items: [
+          { badge: '↺ Recent', tone: 'text-emerald-300', cmd: 'pnpm dev', reason: '✓ 4× · 2m ago' },
+          { badge: '↺ Recent', tone: 'text-emerald-300', cmd: 'pnpm test', reason: '✓ 2× · 5m ago' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'pnpm build', reason: 'Build Next.js production bundle' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'pnpm lint', reason: 'Run ESLint across project' },
+          { badge: '⚙ Script', tone: 'text-amber-300', cmd: 'pnpm run check', reason: 'package.json: check script' },
+          { badge: '⌘ Hist', tone: 'text-indigo-300', cmd: 'pnpm dlx shadcn@latest', reason: 'Shell history' },
+        ],
+      },
+      error: {
+        pre: '/usr/bin/python3: No module named pytest',
+        typed: '',
+        mode: 'FIX',
+        errBanner: true,
+        answer: '',
+        items: [
+          { badge: '✦ Fix', tone: 'text-rose-300', cmd: 'python3 -m pip install pytest', reason: 'Install missing Python module: pytest' },
+          { badge: '✦ Fix', tone: 'text-rose-300', cmd: 'python3 -m unittest discover -s tests', reason: 'Run stdlib unittest alternative' },
+          { badge: '↻ Retry', tone: 'text-lime-300', cmd: 'python3 -m pytest tests/test_cue_engine.py -v', reason: 'Re-run original command after fix' },
+          { badge: '↺ Recent', tone: 'text-emerald-300', cmd: 'git status', reason: '✓ 3× · 4m ago' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'python3 -m py_compile engine/*.py', reason: 'Verify Python bytecode syntax' },
+        ],
+      },
+      ask: {
+        pre: '',
+        typed: 'cue ask "what is the version of this plugin?"',
+        mode: 'ASK CLI',
+        errBanner: false,
+        answer: 'cue plugin version is 0.0.1 (check anytime via cue --version)',
+        items: [
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue --version', reason: 'Print installed cue version' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue status', reason: 'Show model, prompt & storage status' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue models', reason: 'Inspect OpenRouter :free model order' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue settings', reason: 'Open interactive cue settings TUI' },
+        ],
+      },
+    };
+
+    let curSim = 'smart';
+    let simIdx = 0;
+    let typedOverride = null;
+    let autoPlaying = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let autoTimer = null;
+
+    function updateAutoPill() {
+      const pill = document.getElementById('btn-autoplay');
+      const dot = document.getElementById('autoplay-dot');
+      const lbl = document.getElementById('autoplay-label');
+      if (!pill || !dot || !lbl) return;
+      if (autoPlaying) {
+        lbl.textContent = 'Auto';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+        pill.className = 'shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 hover:bg-emerald-500/25 transition-all';
+      } else {
+        lbl.textContent = 'Paused';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-slate-400';
+        pill.className = 'shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-mono bg-white/10 text-slate-300 border border-white/15 hover:bg-white/20 transition-all';
+      }
+    }
+
+    function pauseAutoDemo() {
+      if (!autoPlaying) return;
+      autoPlaying = false;
+      if (autoTimer) clearTimeout(autoTimer);
+      autoTimer = null;
+      typedOverride = null;
+      updateAutoPill();
+    }
+
+    function renderSim() {
+      const s = scenarios[curSim];
+      const activeTyped = typedOverride !== null ? typedOverride : s.typed;
+      const preEl = document.getElementById('sim-preoutput');
+      const typedEl = document.getElementById('sim-typed');
+      const ghostEl = document.getElementById('sim-ghost');
+      const modeEl = document.getElementById('sim-mode');
+      const counterEl = document.getElementById('sim-counter');
+      const errEl = document.getElementById('sim-error-banner');
+      const ansEl = document.getElementById('sim-answer-banner');
+      const ansTxt = document.getElementById('sim-answer-text');
+      const rowsEl = document.getElementById('sim-rows');
+
+      preEl.textContent = s.pre;
+      preEl.classList.toggle('hidden', !s.pre);
+      typedEl.textContent = activeTyped;
+      modeEl.textContent = s.mode;
+      counterEl.textContent = `[${simIdx + 1}/${s.items.length}]`;
+      errEl.classList.toggle('hidden', !s.errBanner);
+      ansEl.classList.toggle('hidden', !s.answer);
+      ansTxt.textContent = s.answer;
+
+      const selectedCmd = s.items[simIdx].cmd;
+      if (curSim === 'ask') {
+        ghostEl.textContent = '';
+      } else if (activeTyped && selectedCmd.startsWith(activeTyped)) {
+        ghostEl.textContent = selectedCmd.slice(activeTyped.length);
+      } else if (!activeTyped) {
+        ghostEl.textContent = selectedCmd;
+      } else {
+        ghostEl.textContent = '';
+      }
+
+      rowsEl.innerHTML = s.items
+        .map((item, i) => {
+          const sel = i === simIdx;
+          return `
+            <button type="button" data-row-idx="${i}" class="sim-row w-full text-left px-3 py-1.5 grid grid-cols-12 items-center gap-2 transition-colors duration-200 ${sel ? 'bg-[#0b5678] text-white' : 'hover:bg-white/[0.04] text-slate-200'}">
+              <span class="col-span-4 sm:col-span-3 font-semibold whitespace-nowrap ${sel ? 'text-white' : item.tone}">${sel ? '❯ ' : '  '}${item.badge}</span>
+              <span class="col-span-8 sm:col-span-4 font-semibold truncate">${item.cmd}</span>
+              <span class="hidden sm:block sm:col-span-5 text-xs truncate ${sel ? 'text-cyan-100' : 'text-slate-400'}">${item.reason}</span>
+            </button>
+          `;
+        })
+        .join('');
+
+      document.querySelectorAll('.sim-row').forEach((row) => {
+        row.addEventListener('click', () => {
+          pauseAutoDemo();
+          simIdx = Number(row.dataset.rowIdx);
+          renderSim();
+        });
+      });
+
+      document.querySelectorAll('.sim-btn').forEach((b) => {
+        const active = b.dataset.sim === curSim;
+        b.className = active
+          ? 'sim-btn px-2.5 py-1 rounded-md text-xs font-medium bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 transition-all'
+          : 'sim-btn px-2.5 py-1 rounded-md text-xs font-medium bg-white/5 text-slate-300 border border-white/10 hover:border-white/25 transition-all';
+      });
+    }
+
+    // Auto-typing interactive loop
+    const demoFrames = [
+      { sim: 'smart', idx: 0, text: 'p', delay: 220 },
+      { sim: 'smart', idx: 0, text: 'pn', delay: 140 },
+      { sim: 'smart', idx: 0, text: 'pnp', delay: 140 },
+      { sim: 'smart', idx: 0, text: 'pnpm ', delay: 1100 },
+      { sim: 'smart', idx: 1, text: 'pnpm ', delay: 1000 },
+      { sim: 'smart', idx: 2, text: 'pnpm ', delay: 1200 },
+      { sim: 'error', idx: 0, text: '', delay: 1600 },
+      { sim: 'error', idx: 2, text: '', delay: 1400 },
+      { sim: 'ask', idx: 0, text: 'cue ask "what is the version?"', delay: 2200 },
+    ];
+    let framePtr = 3; // start cleanly on complete 'pnpm ' for initial paint, then animate forward
+
+    function stepAutoDemo() {
+      if (!autoPlaying) return;
+      const f = demoFrames[framePtr];
+      curSim = f.sim;
+      simIdx = f.idx;
+      typedOverride = f.text;
+      renderSim();
+      framePtr = (framePtr + 1) % demoFrames.length;
+      autoTimer = setTimeout(stepAutoDemo, f.delay);
+    }
+
+    document.getElementById('btn-autoplay').addEventListener('click', () => {
+      if (autoPlaying) {
+        pauseAutoDemo();
+      } else {
+        autoPlaying = true;
+        updateAutoPill();
+        framePtr = 0;
+        stepAutoDemo();
+      }
+    });
+
+    document.querySelectorAll('.sim-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        pauseAutoDemo();
+        curSim = btn.dataset.sim;
+        simIdx = 0;
+        renderSim();
+      });
+    });
+
+    document.getElementById('btn-sim-down').addEventListener('click', () => {
+      pauseAutoDemo();
+      const len = scenarios[curSim].items.length;
+      simIdx = (simIdx + 1) % len;
+      renderSim();
+    });
+
+    document.getElementById('btn-sim-up').addEventListener('click', () => {
+      pauseAutoDemo();
+      const len = scenarios[curSim].items.length;
+      simIdx = (simIdx - 1 + len) % len;
+      renderSim();
+    });
+
+    document.getElementById('btn-sim-tab').addEventListener('click', () => {
+      pauseAutoDemo();
+      const chosen = scenarios[curSim].items[simIdx].cmd;
+      document.getElementById('sim-typed').textContent = chosen;
+      document.getElementById('sim-ghost').textContent = '';
+    });
+
+    document.getElementById('sim-container').addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        pauseAutoDemo();
+        const len = scenarios[curSim].items.length;
+        simIdx = (simIdx + 1) % len;
+        renderSim();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        pauseAutoDemo();
+        const len = scenarios[curSim].items.length;
+        simIdx = (simIdx - 1 + len) % len;
+        renderSim();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        document.getElementById('btn-sim-tab').click();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !lightbox.classList.contains('hidden')) {
+        lightbox.classList.add('hidden');
+        lightbox.classList.remove('flex');
+      }
+    });
+
+    // Scroll reveal animation
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            io.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.08 }
+    );
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+    updateAutoPill();
+    renderSim();
+    if (autoPlaying) {
+      autoTimer = setTimeout(stepAutoDemo, 1300);
+    }
+  </script>
+</body>
+</html>

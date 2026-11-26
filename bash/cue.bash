@@ -1,4 +1,4 @@
-# bash/cue.bash — Bash support for cue (Linux, macOS, WSL, Git Bash)
+# bash/cue.bash - Bash support for cue (Linux, macOS, WSL, Git Bash)
 
 if [[ -z "${BASH_VERSION:-}" ]]; then
   return 0 2>/dev/null || exit 0

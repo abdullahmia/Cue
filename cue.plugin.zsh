@@ -1,4 +1,4 @@
-# cue.plugin.zsh — Smart AI Zsh Autocomplete & Project History Dropdown
+# cue.plugin.zsh - Smart AI Zsh Autocomplete & Project History Dropdown
 # Compatible with Oh My Zsh, Zinit, Antigen, Sheldon, or direct `source`.
 
 if [[ -z "$ZSH_VERSION" ]]; then

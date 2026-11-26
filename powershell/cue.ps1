@@ -1,4 +1,4 @@
-﻿# powershell/cue.ps1 — Windows PowerShell & pwsh adapter for cue
+﻿# powershell/cue.ps1 - Windows PowerShell & pwsh adapter for cue
 
 $script:CueVersion = "0.0.1"
 $script:CuePluginDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)

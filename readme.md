@@ -1,4 +1,4 @@
-# cue — Smart AI Zsh Autocomplete & Project History Dropdown
+# cue - Smart AI Zsh Autocomplete & Project History Dropdown
 
 `cue` is a modern Zsh plugin that pairs **inline ghost-text suggestions** and an **interactive Up/Down arrow dropdown** with **automatic project analysis**, **project-scoped command history**, and **OpenRouter `:free` AI models**.
 
@@ -11,12 +11,12 @@
 - **Interactive ZLE Dropdown & Ghost Text**
   - Renders directly below your prompt via Zsh Line Editor (`POSTDISPLAY` + `region_highlight`) without polluting terminal scrollback.
   - Combines five prioritized sources in one ranked view:
-    - `✦ Fix` — Instant diagnostic & AI fixes automatically surfaced when a command fails
-    - `↻ Retry` — Re-suggests your original failed command after a fix succeeds
-    - `↺ Recent` — Recent commands executed in the current project (max 3 in suggestion box)
-    - `✦ AI` — Smart, project-aware commands from OpenRouter `:free` models (max 12)
-    - `⚙ Script` — Auto-detected runnable scripts and targets (`package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, `docker-compose.yml`, etc.)
-    - `⌘ Hist` — Global shell history
+    - `✦ Fix`: Instant diagnostic & AI fixes automatically surfaced when a command fails
+    - `↻ Retry`: Re-suggests your original failed command after a fix succeeds
+    - `↺ Recent`: Recent commands executed in the current project (max 3 in suggestion box)
+    - `✦ AI`: Smart, project-aware commands from OpenRouter `:free` models (max 12)
+    - `⚙ Script`: Auto-detected runnable scripts and targets (`package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, `docker-compose.yml`, etc.)
+    - `⌘ Hist`: Global shell history
   - Pure Zsh in-memory + TSV cache lookups keep keystrokes instantaneous; AI calls run asynchronously via a FIFO + `zle -F` file descriptor.
 - **Automatic Folder Resume & Silent Background Analysis**
   - On terminal startup or `cd`, `cue` checks `~/.cue/projects/` first to resume any existing project context immediately, or creates one automatically.
@@ -53,7 +53,7 @@
 ## Requirements
 
 - **Zsh** `5.x` (tested on Zsh 5.9)
-- **Python 3** (uses Python standard library only — no `pip install` required)
+- **Python 3** (uses Python standard library only; no `pip install` required)
 - **git** (optional, used for repository root resolution and branch/status context)
 
 ---

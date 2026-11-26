@@ -542,7 +542,7 @@ class TestSettingsPromptModeAndUninstall(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fake_home = Path(tmp)
             zshrc = fake_home / ".zshrc"
-            zshrc.write_text('export PATH="$PATH"\n# cue — Smart AI Zsh autocomplete\nsource "/tmp/cue.plugin.zsh"\n', encoding="utf-8")
+            zshrc.write_text('export PATH="$PATH"\n# cue - Smart AI Zsh autocomplete\nsource "/tmp/cue.plugin.zsh"\n', encoding="utf-8")
             cue_dir = fake_home / ".cue"
             cue_dir.mkdir()
             (cue_dir / ".cue_home").write_text("cue\n", encoding="utf-8")
