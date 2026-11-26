@@ -120,6 +120,7 @@
       .hero-enter, .reveal { opacity: 1; transform: none; }
     }
     /* Crisp scrollbar for code blocks */
+    pre { max-width: 100%; }
     pre::-webkit-scrollbar { height: 6px; }
     pre::-webkit-scrollbar-thumb { background: #30363d; border-radius: 9999px; }
   </style>
@@ -159,9 +160,9 @@
     </div>
   </header>
 
-  <main>
+  <main class="w-full max-w-full overflow-x-clip">
     <!-- Hero + Interactive Terminal Simulator -->
-    <section id="demo" class="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-14">
+    <section id="demo" class="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-14">
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
         <div class="lg:col-span-5 min-w-0 space-y-6">
           <div class="hero-enter inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/25 text-cyan-300 text-xs font-medium" style="animation-delay:0ms">
@@ -268,7 +269,7 @@
 
     <!-- How it works: 3 simple pillars -->
     <section class="max-w-6xl mx-auto px-4 sm:px-6 py-10 reveal">
-      <div class="grid sm:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22]/80 p-5 hover:-translate-y-1 hover:border-cyan-400/40 hover:shadow-[0_12px_36px_rgba(34,211,238,0.08)] transition-all duration-300">
           <div class="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 flex items-center justify-center font-mono mb-3">↺</div>
           <h3 class="font-semibold text-white mb-1.5">Project-Scoped &amp; Instant</h3>
@@ -316,7 +317,7 @@
         <div class="p-5 sm:p-8">
           <!-- Panel 1: curl | bash -->
           <div id="panel-curl" class="install-panel space-y-6">
-            <div class="grid md:grid-cols-3 gap-5">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
                 <div>
                   <div class="flex items-center gap-2 mb-2">
@@ -330,7 +331,7 @@
                     <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500">bash / zsh</span>
                     <button data-copy-target="code-curl-1" class="copy-btn px-2 py-0.5 rounded text-[11px] bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
                   </div>
-                  <pre id="code-curl-1" class="font-mono text-xs text-emerald-300 overflow-x-auto p-3">curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash</pre>
+                  <pre id="code-curl-1" class="font-mono text-xs text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all sm:whitespace-pre sm:break-normal p-3">curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash</pre>
                 </div>
               </div>
 
@@ -372,7 +373,7 @@
 
           <!-- Panel 2: Homebrew -->
           <div id="panel-brew" class="install-panel hidden space-y-6">
-            <div class="grid md:grid-cols-3 gap-5">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
                 <div>
                   <div class="flex items-center gap-2 mb-2">
@@ -430,7 +431,7 @@ source ~/.zshrc</pre>
 
           <!-- Panel 3: Oh My Zsh / Zinit / Sheldon -->
           <div id="panel-omz" class="install-panel hidden space-y-4">
-            <div class="grid md:grid-cols-3 gap-5">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div class="min-w-0 rounded-xl border border-white/10 bg-[#0d1117] p-4 flex flex-col justify-between">
                 <div>
                   <h3 class="font-semibold text-white text-sm mb-2">Oh My Zsh</h3>
@@ -561,7 +562,7 @@ cd $HOME\cue
 
     <!-- Keybindings & CLI Reference -->
     <section id="commands" class="max-w-6xl mx-auto px-4 sm:px-6 py-12 reveal">
-      <div class="grid md:grid-cols-2 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Keybindings Card -->
         <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-6 hover:border-cyan-400/30 transition-colors">
           <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
@@ -597,25 +598,25 @@ cd $HOME\cue
             <span class="text-emerald-300 font-mono">$</span> Everyday CLI Commands
           </h3>
           <div class="space-y-2.5 text-sm">
-            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
-              <code class="font-mono text-xs text-cyan-300">cue ask "what is the version?"</code>
-              <span class="text-xs text-slate-400 text-right">Ask AI &amp; get runnable commands</span>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2 border-b border-white/5">
+              <code class="font-mono text-xs text-cyan-300 break-all">cue ask "what is the version?"</code>
+              <span class="text-xs text-slate-400 sm:text-right">Ask AI &amp; get runnable commands</span>
             </div>
-            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
-              <code class="font-mono text-xs text-cyan-300">cue prompt "find large logs"</code>
-              <span class="text-xs text-slate-400 text-right">Translate task to shell commands</span>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2 border-b border-white/5">
+              <code class="font-mono text-xs text-cyan-300 break-all">cue prompt "find large logs"</code>
+              <span class="text-xs text-slate-400 sm:text-right">Translate task to shell commands</span>
             </div>
-            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2 border-b border-white/5">
               <code class="font-mono text-xs text-emerald-300">cue settings</code>
-              <span class="text-xs text-slate-400 text-right">Interactive TUI settings menu</span>
+              <span class="text-xs text-slate-400 sm:text-right">Interactive TUI settings menu</span>
             </div>
-            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2 border-b border-white/5">
               <code class="font-mono text-xs text-slate-200">cue status · cue models</code>
-              <span class="text-xs text-slate-400 text-right">Check active :free model &amp; storage</span>
+              <span class="text-xs text-slate-400 sm:text-right">Check active :free model &amp; storage</span>
             </div>
-            <div class="flex items-center justify-between gap-3 py-2">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2">
               <code class="font-mono text-xs text-rose-300">cue uninstall</code>
-              <span class="text-xs text-slate-400 text-right">Cleanly remove hooks &amp; data</span>
+              <span class="text-xs text-slate-400 sm:text-right">Cleanly remove hooks &amp; data</span>
             </div>
           </div>
         </div>
