@@ -2,15 +2,7 @@
 
 `cue` is a modern Zsh plugin that pairs **inline ghost-text suggestions** and an **interactive Up/Down arrow dropdown** with **automatic project analysis**, **project-scoped command history**, and **OpenRouter `:free` AI models**.
 
-```text
-❯ pnpm ▋dev
-╭─ ✦ cue · SMART · Node.js, Next.js · qwen3-coder:free [1/6] ──────────────────╮
-│ ❯ ↺ Recent  pnpm dev                  ✓ 4× · 2m ago                         │
-│   ✦ AI      pnpm test                 Run Next.js test suite                │
-│   ⚙ Script  pnpm build                package.json: next build              │
-│   ⌘ Hist    git status                Shell history                         │
-╰─ ↑/↓ select · Tab/→ fill · Enter run · ^Space AI · Esc close ───────────────╯
-```
+![cue Smart ZLE Autocomplete & Dropdown](assets/smart-dropdown.png)
 
 ---
 
@@ -43,6 +35,18 @@
   - Filters out commands containing inline secrets/tokens/keys before saving.
   - Enforces a **256 KB** per-project context cap, a **20 MB** total projects LRU cap, and **512 KB** rotating logs.
   - Includes `cue context clear` tools to delete missing/deleted folders, stale contexts (`--older-than 30d`), or specific projects.
+
+---
+
+## Screenshots
+
+### Automatic Error Diagnosis, Dimmed Fix Ghost & Retry
+
+![cue Automatic Error Diagnosis & Fix Suggestions](assets/error-fix-dropdown.png)
+
+### Interactive Settings TUI (`cue settings`)
+
+![cue Interactive Settings TUI](assets/settings-tui.png)
 
 ---
 

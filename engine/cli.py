@@ -546,7 +546,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
     print_banner(theme, f"v{__version__} · Status")
     key_ok = bool(cfg.get("openrouter_api_key"))
     print(f"  API Key:         {theme.green('configured') if key_ok else theme.yellow('not set (`cue onboard`)')}")
-    print(f"  Prompt CLI:      {theme.cyan('cue ask \"<prompt>\"')} {theme.dim('/ cue prompt \"<prompt>\"')}")
+    prompt_hint_cli = theme.cyan('cue ask "<prompt>"') + " " + theme.dim('/ cue prompt "<prompt>"')
+    print(f"  Prompt CLI:      {prompt_hint_cli}")
     print(f"  Free-only mode:  {theme.green('enforced (:free models only)')}")
     print(f"  Active model:    {theme.cyan(state.get('active_model', DEFAULT_FREE_MODELS[0]))}")
     if state.get("total_fallbacks"):
