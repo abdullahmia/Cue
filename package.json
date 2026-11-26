@@ -1,0 +1,17 @@
+{
+  "name": "cue",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Smart AI Zsh autocomplete, project history dropdown, and CLI assistant",
+  "scripts": {
+    "prepare": "husky",
+    "test": "python3 -m unittest discover -s tests -p \"test_*.py\" -v && zsh tests/test_zsh_integration.zsh",
+    "lint:syntax": "python3 -m py_compile engine/*.py bin/cue && zsh -n cue.plugin.zsh zsh/*.zsh && bash -n bash/cue.bash",
+    "commitlint": "commitlint --edit"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "husky": "^9.1.7"
+  }
+}

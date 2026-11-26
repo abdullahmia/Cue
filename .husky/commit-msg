@@ -1,0 +1,9 @@
+export PATH="$PWD/node_modules/.bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if ! command -v node >/dev/null 2>&1; then
+  for _nvm_bin in "${NVM_DIR:-$HOME/.nvm}"/versions/node/*/bin; do
+    [ -d "$_nvm_bin" ] && PATH="$_nvm_bin:$PATH"
+  done
+  export PATH
+fi
+
+npx --no -- commitlint --edit "$1"

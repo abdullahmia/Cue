@@ -1,0 +1,55 @@
+# Byte-compiled / Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+wheels/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Node / Husky / Commitlint
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Cue local runtime data & secrets
+.cue/
+.cuee/
+.tawh/
+*.secret
+*.key
+.env
+.env.*
+
+# Logs & temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.sublime-workspace

@@ -1,0 +1,4 @@
+python3 -m py_compile engine/*.py bin/cue
+zsh -n cue.plugin.zsh zsh/*.zsh
+bash -n bash/cue.bash
+python3 -m unittest discover -s tests -p "test_*.py"
