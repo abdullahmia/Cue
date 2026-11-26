@@ -71,7 +71,8 @@ This clones `cue` into `~/.local/share/cue` (override with `CUE_INSTALL_DIR`), m
 ### Option 2: Homebrew (macOS / Linux)
 
 ```zsh
-brew install abdullahmia/tap/cue-zsh
+brew tap abdullahmia/cue https://github.com/abdullahmia/Cue.git
+brew install abdullahmia/cue/cue-zsh
 ```
 
 Then add the printed snippet to your `~/.zshrc`:
