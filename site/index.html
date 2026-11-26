@@ -1019,7 +1019,13 @@ cd $HOME\cue
       },
       { threshold: 0.08 }
     );
-    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+    document.querySelectorAll('.reveal').forEach((el) => {
+      if (el.getBoundingClientRect().top < window.innerHeight * 0.96) {
+        el.classList.add('visible');
+      } else {
+        io.observe(el);
+      }
+    });
 
     updateAutoPill();
     renderSim();
