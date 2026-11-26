@@ -1,11 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CUE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-chmod +x "$CUE_DIR/bin/cue"
+CUE_REPO_URL="${CUE_REPO_URL:-https://github.com/abdullahmia/Cue.git}"
+CUE_INSTALL_DIR="${CUE_INSTALL_DIR:-$HOME/.local/share/cue}"
+
+SCRIPT_SRC="${BASH_SOURCE[0]:-}"
+CUE_DIR=""
+if [[ -n "$SCRIPT_SRC" && -f "$SCRIPT_SRC" ]]; then
+  CANDIDATE_DIR="$(cd "$(dirname "$SCRIPT_SRC")" && pwd)"
+  if [[ -f "$CANDIDATE_DIR/cue.plugin.zsh" ]]; then
+    CUE_DIR="$CANDIDATE_DIR"
+  fi
+fi
 
 echo ""
 echo "✦ Installing cue Terminal Plugin (macOS / Linux)..."
+
+if [[ -z "$CUE_DIR" ]]; then
+  if ! command -v git >/dev/null 2>&1; then
+    echo "✗ Error: git is required for standalone installation."
+    exit 1
+  fi
+  CUE_DIR="$CUE_INSTALL_DIR"
+  mkdir -p "$(dirname "$CUE_DIR")"
+  if [[ -d "$CUE_DIR/.git" ]]; then
+    echo "  Updating existing repository in $CUE_DIR..."
+    git -C "$CUE_DIR" pull --ff-only
+  elif [[ -e "$CUE_DIR" ]]; then
+    if [[ ! -f "$CUE_DIR/cue.plugin.zsh" ]]; then
+      echo "✗ Error: $CUE_DIR already exists and is not a cue installation."
+      exit 1
+    fi
+  else
+    echo "  Cloning $CUE_REPO_URL into $CUE_DIR..."
+    git clone --depth 1 "$CUE_REPO_URL" "$CUE_DIR"
+  fi
+fi
+
+chmod +x "$CUE_DIR/bin/cue"
 echo "  Plugin directory: $CUE_DIR"
 
 if ! command -v python3 >/dev/null 2>&1; then

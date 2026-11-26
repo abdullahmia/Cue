@@ -60,7 +60,29 @@
 
 ## Installation
 
-### Option 1: Quick Installer
+### Option 1: One-Line Installer (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash
+```
+
+This clones `cue` into `~/.local/share/cue` (override with `CUE_INSTALL_DIR`), makes `bin/cue` executable, links Oh My Zsh if detected, and adds `source ".../cue.plugin.zsh"` to `~/.zshrc`.
+
+### Option 2: Homebrew (macOS / Linux)
+
+```zsh
+brew install abdullahmia/tap/cue-zsh
+```
+
+Then add the printed snippet to your `~/.zshrc`:
+
+```zsh
+source "$(brew --prefix)/opt/cue-zsh/share/cue-zsh/cue.plugin.zsh"
+```
+
+### Option 3: Git Clone or Zsh Plugin Managers
+
+**Quick clone:**
 
 ```zsh
 git clone https://github.com/abdullahmia/Cue.git ~/cue
@@ -68,15 +90,26 @@ cd ~/cue
 ./install.sh
 ```
 
-`install.sh` makes `bin/cue` executable, symlinks into Oh My Zsh custom plugins if detected, and adds `source ".../cue.plugin.zsh"` to your `~/.zshrc`.
+**Zinit:**
 
-### Option 2: Manual `~/.zshrc`
+```zsh
+zinit light abdullahmia/Cue
+```
+
+**Sheldon (`~/.config/sheldon/plugins.toml`):**
+
+```toml
+[plugins.cue]
+github = "abdullahmia/Cue"
+```
+
+### Option 4: Manual `~/.zshrc`
 
 ```zsh
 source /path/to/cue/cue.plugin.zsh
 ```
 
-### Option 3: Oh My Zsh
+### Option 5: Oh My Zsh
 
 ```zsh
 ln -s /path/to/cue "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/cue"
@@ -88,7 +121,7 @@ Then add `cue` to `plugins=(...)` in `~/.zshrc`:
 plugins=(git cue)
 ```
 
-### Option 4: Windows PowerShell (`powershell.exe` or `pwsh`)
+### Option 6: Windows PowerShell (`powershell.exe` or `pwsh`)
 
 ```powershell
 git clone https://github.com/abdullahmia/Cue.git $HOME\cue
@@ -102,7 +135,7 @@ Or dot-source directly in `$PROFILE`:
 . "C:\path\to\cue\powershell\cue.ps1"
 ```
 
-### Option 5: Bash (Linux / macOS / Git Bash)
+### Option 7: Bash (Linux / macOS / Git Bash)
 
 ```bash
 source /path/to/cue/bash/cue.bash
