@@ -60,13 +60,21 @@
 
 ## Installation
 
-### Option 1: One-Line Installer (Recommended)
+### Option 1: One-Line Installer (macOS / Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash
 ```
 
-This clones `cue` into `~/.local/share/cue` (override with `CUE_INSTALL_DIR`), makes `bin/cue` executable, links Oh My Zsh if detected, and adds `source ".../cue.plugin.zsh"` to `~/.zshrc`.
+This clones `cue` into `~/.local/share/cue` (override with `CUE_INSTALL_DIR`), makes `bin/cue` executable, links Oh My Zsh if detected, and appends `source ".../cue.plugin.zsh"` to `~/.zshrc` (and `bash/cue.bash` to `~/.bashrc` when present).
+
+Then reload your shell to start interactive onboarding:
+
+```zsh
+source ~/.zshrc
+```
+
+---
 
 ### Option 2: Homebrew (macOS / Linux)
 
@@ -75,20 +83,27 @@ brew tap abdullahmia/cue https://github.com/abdullahmia/Cue.git
 brew install abdullahmia/cue/cue-zsh
 ```
 
-Then add the printed snippet to your `~/.zshrc`:
+Activate the Zsh plugin in `~/.zshrc` and reload:
 
 ```zsh
-source "$(brew --prefix)/opt/cue-zsh/share/cue-zsh/cue.plugin.zsh"
+echo 'source "$(brew --prefix)/opt/cue-zsh/share/cue-zsh/cue.plugin.zsh"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
-### Option 3: Git Clone or Zsh Plugin Managers
+---
 
-**Quick clone:**
+### Option 3: Zsh Plugin Managers
+
+**Oh My Zsh:**
 
 ```zsh
-git clone https://github.com/abdullahmia/Cue.git ~/cue
-cd ~/cue
-./install.sh
+git clone https://github.com/abdullahmia/Cue.git "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/cue"
+```
+
+Add `cue` to `plugins=(...)` in `~/.zshrc` and run `source ~/.zshrc`:
+
+```zsh
+plugins=(git cue)
 ```
 
 **Zinit:**
@@ -104,25 +119,26 @@ zinit light abdullahmia/Cue
 github = "abdullahmia/Cue"
 ```
 
-### Option 4: Manual `~/.zshrc`
+---
+
+### Option 4: Manual Clone
 
 ```zsh
-source /path/to/cue/cue.plugin.zsh
+git clone https://github.com/abdullahmia/Cue.git ~/.local/share/cue
+cd ~/.local/share/cue
+./install.sh
+source ~/.zshrc
 ```
 
-### Option 5: Oh My Zsh
+Or source directly in `~/.zshrc` without running `install.sh`:
 
 ```zsh
-ln -s /path/to/cue "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/cue"
+source ~/.local/share/cue/cue.plugin.zsh
 ```
 
-Then add `cue` to `plugins=(...)` in `~/.zshrc`:
+---
 
-```zsh
-plugins=(git cue)
-```
-
-### Option 6: Windows PowerShell (`powershell.exe` or `pwsh`)
+### Option 5: Windows PowerShell (`powershell.exe` or `pwsh`)
 
 ```powershell
 git clone https://github.com/abdullahmia/Cue.git $HOME\cue
@@ -133,14 +149,24 @@ cd $HOME\cue
 Or dot-source directly in `$PROFILE`:
 
 ```powershell
-. "C:\path\to\cue\powershell\cue.ps1"
+. "$HOME\cue\powershell\cue.ps1"
 ```
 
-### Option 7: Bash (Linux / macOS / Git Bash)
+---
+
+### Option 6: Bash (Linux / macOS / Git Bash)
 
 ```bash
-source /path/to/cue/bash/cue.bash
+source ~/.local/share/cue/bash/cue.bash
 ```
+
+---
+
+### Updating & Uninstalling
+
+- **Update (One-Line / Git):** re-run `curl -fsSL https://raw.githubusercontent.com/abdullahmia/Cue/main/install.sh | bash` (or `git -C ~/.local/share/cue pull`).
+- **Update (Homebrew):** `brew update && brew upgrade cue-zsh`
+- **Uninstall:** run `cue uninstall` (interactive prompt lets you keep or purge `~/.cue` data; removes `~/.zshrc` / `~/.bashrc` / Oh My Zsh hooks cleanly). For Homebrew installs, also run `brew uninstall cue-zsh`.
 
 ---
 
@@ -279,22 +305,18 @@ Supported environment variables:
 ```text
 cue/
 ├── cue.plugin.zsh          # Zsh plugin entrypoint
-├── install.sh               # Installer script
+├── Formula/cue-zsh.rb      # Homebrew single-repo tap formula
+├── install.sh              # One-line / local installer (macOS & Linux)
+├── install.ps1             # Windows PowerShell installer
+├── uninstall.sh / .ps1     # Clean shell uninstaller scripts
 ├── bin/cue                 # CLI executable
-├── zsh/
-│   ├── ui.zsh               # CLI wrapper & onboarding trigger
-│   ├── hooks.zsh            # chpwd/preexec/precmd hooks & async FIFO handler
-│   └── zle_dropdown.zsh     # ZLE ghost text & Up/Down dropdown widgets
-├── engine/
-│   ├── cli.py               # Argument parser & command handlers
-│   ├── config.py            # Config, state, paths, atomic JSON & log rotation
-│   ├── context_manager.py   # Per-project storage, size caps, secret filter, legacy cleanup
-│   ├── openrouter_client.py # Free-only model client, SSL fallback, rate-limit switching
-│   ├── project_analyzer.py  # Stack, script, git, & directory tree detection
-│   ├── suggester.py         # Multi-source ranking & Zsh TSV cache generation
-│   └── tui.py               # ANSI tables, banners, and interactive prompts
+├── zsh/                    # ZLE dropdown, hooks, and UI wrapper
+├── bash/cue.bash           # Bash shell adapter
+├── powershell/cue.ps1      # PowerShell adapter
+├── engine/                 # Python stdlib engine (CLI, daemon, context, OpenRouter, TUI)
+├── assets/                 # README screenshots
 └── tests/
-    ├── test_cue_engine.py      # Python unit & integration tests
+    ├── test_cue_engine.py       # Python unit & integration tests
     └── test_zsh_integration.zsh # Zsh syntax & ZLE dropdown verification
 ```
 
