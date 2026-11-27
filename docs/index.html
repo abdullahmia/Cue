@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>cue: Smart AI Zsh Autocomplete & Project History Dropdown</title>
-  <meta name="description" content="Smart AI Zsh autocomplete & project history dropdown with inline ghost text, auto error-fix suggestions, and OpenRouter :free model fallback." />
+  <meta name="description" content="Smart AI Zsh autocomplete & project history dropdown with inline ghost text, auto error-fix suggestions, and multi-provider AI (OpenRouter :free, ChatGPT, Gemini, Claude, Groq, DeepSeek, Ollama)." />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -137,7 +137,7 @@
       <a href="#" class="flex items-center gap-2.5 group">
         <span class="w-8 h-8 rounded-lg bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300 font-mono text-base group-hover:scale-105 transition-transform">✦</span>
         <span class="font-mono font-bold text-lg tracking-tight text-white">cue</span>
-        <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400">v0.1.0</span>
+        <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400">v0.2.0</span>
       </a>
 
       <nav class="hidden md:flex items-center gap-7 text-sm text-slate-300">
@@ -175,7 +175,7 @@
           </h1>
 
           <p class="hero-enter text-slate-300 text-base sm:text-lg leading-relaxed" style="animation-delay:160ms">
-            <span class="font-mono text-cyan-300">cue</span> renders an inline ghost prompt and an interactive <kbd class="px-1.5 py-0.5 text-xs font-mono bg-white/10 rounded border border-white/15">↑</kbd>/<kbd class="px-1.5 py-0.5 text-xs font-mono bg-white/10 rounded border border-white/15">↓</kbd> dropdown from your project history, scripts, automatic error fixes, and OpenRouter <code class="text-cyan-300 font-mono text-sm">:free</code> AI models.
+            <span class="font-mono text-cyan-300">cue</span> renders an inline ghost prompt and an interactive <kbd class="px-1.5 py-0.5 text-xs font-mono bg-white/10 rounded border border-white/15">↑</kbd>/<kbd class="px-1.5 py-0.5 text-xs font-mono bg-white/10 rounded border border-white/15">↓</kbd> dropdown from your project history, scripts, automatic error fixes, and multi-provider AI (OpenRouter <code class="text-cyan-300 font-mono text-sm">:free</code>, ChatGPT, Gemini, Claude, Groq, DeepSeek, &amp; Ollama).
           </p>
 
           <!-- Quick install bar right in Hero -->
@@ -194,7 +194,7 @@
 
           <div class="hero-enter flex flex-wrap items-center gap-3 text-xs text-slate-400" style="animation-delay:320ms">
             <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> Pure Python 3 stdlib</span>
-            <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> :free models only</span>
+            <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> 7 AI providers + :free mode</span>
             <span class="inline-flex items-center gap-1.5"><span class="text-emerald-400">✓</span> Secret-filtered ~/.cue context</span>
           </div>
         </div>
@@ -277,13 +277,29 @@
         </div>
         <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22]/80 p-5 hover:-translate-y-1 hover:border-cyan-400/40 hover:shadow-[0_12px_36px_rgba(34,211,238,0.08)] transition-all duration-300">
           <div class="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 flex items-center justify-center font-mono mb-3">✦</div>
-          <h3 class="font-semibold text-white mb-1.5">OpenRouter :free AI</h3>
-          <p class="text-sm text-slate-400 leading-relaxed">Enforces <code class="text-cyan-300 font-mono">:free</code> models only (up to <span class="text-cyan-300 font-mono">12</span> AI suggestions), tracks model latency, and switches automatically on rate limits.</p>
+          <h3 class="font-semibold text-white mb-1.5">Multi-Provider AI</h3>
+          <p class="text-sm text-slate-400 leading-relaxed">Supports OpenRouter (<code class="text-cyan-300 font-mono">:free</code> enforced), OpenAI ChatGPT, Google Gemini, Anthropic Claude, Groq, DeepSeek, &amp; Ollama with automatic model and provider fallback.</p>
         </div>
         <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22]/80 p-5 hover:-translate-y-1 hover:border-cyan-400/40 hover:shadow-[0_12px_36px_rgba(34,211,238,0.08)] transition-all duration-300">
           <div class="w-9 h-9 rounded-lg bg-rose-500/15 border border-rose-400/30 text-rose-300 flex items-center justify-center font-mono mb-3">⚠</div>
           <h3 class="font-semibold text-white mb-1.5">Auto Error Fix &amp; Retry</h3>
           <p class="text-sm text-slate-400 leading-relaxed">When a command fails, <span class="font-mono text-white">cue</span> shows a dimmed fix ghost right away. Press <kbd class="px-1 bg-white/10 rounded text-xs font-mono">Tab</kbd> to fix, then <kbd class="px-1 bg-white/10 rounded text-xs font-mono">Tab</kbd> again to retry your original command.</p>
+        </div>
+      </div>
+
+      <!-- Supported AI Platforms Strip -->
+      <div class="mt-5 rounded-2xl border border-white/10 bg-[#161b22]/75 px-5 py-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div class="text-xs font-mono uppercase tracking-wider text-cyan-300 shrink-0">Supported AI Platforms</div>
+          <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+            <span class="px-2.5 py-1 rounded-md bg-cyan-500/10 border border-cyan-400/25 text-cyan-200">OpenRouter (:free)</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">OpenAI (ChatGPT)</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">Google Gemini</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">Anthropic (Claude)</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">Groq</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">DeepSeek</span>
+            <span class="px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-400/25 text-emerald-200">Ollama (Local)</span>
+          </div>
         </div>
       </div>
     </section>
@@ -358,7 +374,7 @@
                     <span class="w-6 h-6 rounded-full bg-emerald-400/20 text-emerald-300 text-xs font-bold flex items-center justify-center">3</span>
                     <h3 class="font-semibold text-white text-sm">Complete quick onboarding</h3>
                   </div>
-                  <p class="text-xs text-slate-400 mb-3">Starts immediately with zero API key needed (Recents &amp; History active). Enable optional AI &amp; OpenRouter <code class="text-cyan-300 font-mono">:free</code> key anytime via:</p>
+                  <p class="text-xs text-slate-400 mb-3">Starts immediately with zero API key needed (Recents &amp; History active). Enable optional AI with OpenRouter <code class="text-cyan-300 font-mono">:free</code>, ChatGPT, Gemini, Claude, Groq, DeepSeek, or Ollama via:</p>
                 </div>
                 <div class="bg-[#161b22] rounded-lg border border-white/10 overflow-hidden">
                   <div class="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-white/[0.02]">
@@ -582,7 +598,7 @@ cd $HOME\cue
               <div class="flex gap-1"><kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-emerald-300">Tab</kbd><kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-emerald-300">→</kbd></div>
             </div>
             <div class="flex items-center justify-between py-2 border-b border-white/5">
-              <span class="text-slate-300">Trigger instant OpenRouter AI refresh</span>
+              <span class="text-slate-300">Trigger instant AI refresh</span>
               <kbd class="px-2 py-0.5 font-mono text-xs bg-[#0d1117] border border-white/15 rounded text-cyan-300">Ctrl+Space</kbd>
             </div>
             <div class="flex items-center justify-between py-2">
@@ -611,8 +627,8 @@ cd $HOME\cue
               <span class="text-xs text-slate-400 sm:text-right">Interactive TUI settings menu</span>
             </div>
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2 border-b border-white/5">
-              <code class="font-mono text-xs text-slate-200">cue status · cue models</code>
-              <span class="text-xs text-slate-400 sm:text-right">Check active :free model &amp; storage</span>
+              <code class="font-mono text-xs text-slate-200">cue token -p gemini · cue models</code>
+              <span class="text-xs text-slate-400 sm:text-right">Set provider keys &amp; inspect models</span>
             </div>
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 py-2">
               <code class="font-mono text-xs text-rose-300">cue uninstall</code>
@@ -706,7 +722,7 @@ cd $HOME\cue
         desc: 'When a command fails, cue diagnoses missing modules, bad permissions, or tool errors in milliseconds and offers a dimmed inline fix command plus automatic retry afterwards.',
         bullets: [
           'Instant offline diagnosis for common CLI failures',
-          'Enriched asynchronously with OpenRouter :free AI fixes',
+          'Enriched asynchronously with multi-provider AI fixes',
           'Auto-suggests your original failed command after the fix succeeds',
         ],
       },
@@ -715,7 +731,7 @@ cd $HOME\cue
         fallback: 'https://raw.githubusercontent.com/abdullahmia/Cue/main/assets/settings-tui.png',
         badge: 'cue settings',
         title: 'Interactive Terminal UI Settings',
-        desc: 'Manage your preferred OpenRouter :free model, rotate API keys, inspect stored project contexts, prune stale folders, or cleanly uninstall with arrow-key navigation.',
+        desc: 'Pick your AI provider (OpenRouter, ChatGPT, Gemini, Claude, Groq, DeepSeek, Ollama), rotate keys, choose models, inspect stored project contexts, or cleanly uninstall with arrow-key navigation.',
         bullets: [
           'Instant save on every change with no messy manual config edits',
           'Multi-select project cleanup with Ctrl+C safe exit handling',
@@ -813,11 +829,11 @@ cd $HOME\cue
         typed: 'cue ask "what is the version of this plugin?"',
         mode: 'ASK CLI',
         errBanner: false,
-        answer: 'cue plugin version is 0.1.0 (check anytime via cue --version)',
+        answer: 'cue plugin version is 0.2.0 (check anytime via cue --version)',
         items: [
           { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue --version', reason: 'Print installed cue version' },
           { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue status', reason: 'Show model, prompt & storage status' },
-          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue models', reason: 'Inspect OpenRouter :free model order' },
+          { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue models', reason: 'Inspect active provider model order' },
           { badge: '✦ AI', tone: 'text-cyan-300', cmd: 'cue settings', reason: 'Open interactive cue settings TUI' },
         ],
       },

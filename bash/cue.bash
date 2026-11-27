@@ -4,7 +4,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
-export CUE_VERSION="0.1.0"
+export CUE_VERSION="0.2.0"
 export CUE_PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -z "${CUE_HOME:-}" ]]; then
   if [[ -d "$HOME/.cue" && ( -f "$HOME/.cue/.cue_home" || -f "$HOME/.cue/config.json" || ( -d "$HOME/.cue/projects" && -d "$HOME/.cue/cache" ) ) ]]; then

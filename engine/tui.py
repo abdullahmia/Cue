@@ -182,7 +182,7 @@ def draw_card(
 def print_banner(theme: Theme, subtitle: str = "") -> None:
     """Render a sleek modern terminal header card with closed, aligned borders."""
     title = theme.bold(theme.cyan("✦ cue")) + theme.slate(" · ") + theme.bold("Smart AI Terminal Assistant")
-    sub = "  " + (theme.dim(subtitle) if subtitle else theme.dim("Project-aware completions · OpenRouter :free models"))
+    sub = "  " + (theme.dim(subtitle) if subtitle else theme.dim("Project-aware completions · Multi-provider AI"))
     card = draw_card(theme, title, "", [sub], width=76)
     print("")
     for line in card:
@@ -757,16 +757,24 @@ def tui_confirm_card(
     return chosen[0]
 
 
-def prompt_api_key(theme: Theme) -> str:
-    """Prompt for OpenRouter API key cleanly with masked input and fallback."""
+def prompt_api_key(
+    theme: Theme,
+    provider_name: str = "OpenRouter",
+    key_url: str = "https://openrouter.ai/keys",
+    key_hint: str = "",
+) -> str:
+    """Prompt for a provider API key cleanly with masked input and fallback."""
     print("")
-    print(theme.bold("  Step 1 · Connect OpenRouter (Free Models Only)"))
-    print(theme.dim("  Get a free API key at: https://openrouter.ai/keys"))
+    print(theme.bold(f"  Connect {provider_name}"))
+    if key_url:
+        print(theme.dim(f"  Get your API key at: {key_url}"))
+    if key_hint:
+        print(theme.dim(f"  Expected format: {key_hint}"))
     print(theme.dim("  Your key is stored locally in config.json (0600 permissions)."))
-    print(theme.dim("  Press Enter without typing to skip for now (local history mode)."))
+    print(theme.dim("  Press Enter without typing to skip for now."))
     print("")
     try:
-        key = getpass.getpass(theme.cyan("  ❯ OpenRouter API key (hidden): "))
+        key = getpass.getpass(theme.cyan(f"  ❯ {provider_name} API key (hidden): "))
     except (EOFError, KeyboardInterrupt):
         print("")
         return ""

@@ -1,6 +1,8 @@
 # cue - Smart AI Zsh Autocomplete & Project History Dropdown
 
-`cue` is a modern Zsh plugin that pairs **inline ghost-text suggestions** and an **interactive Up/Down arrow dropdown** with **automatic project analysis**, **project-scoped command history**, and **OpenRouter `:free` AI models**.
+> **Latest Release: [`v0.2.0`](https://github.com/abdullahmia/Cue/releases/tag/v0.2.0)** · Multi-Provider AI (OpenRouter `:free`, OpenAI ChatGPT, Google Gemini, Anthropic Claude, Groq, DeepSeek, & Ollama Local)
+
+`cue` is a modern Zsh plugin that pairs **inline ghost-text suggestions** and an **interactive Up/Down arrow dropdown** with **automatic project analysis**, **project-scoped command history**, and **multi-provider AI** (OpenRouter `:free`, OpenAI ChatGPT, Google Gemini, Anthropic Claude, Groq, DeepSeek, and local Ollama).
 
 ![cue Smart ZLE Autocomplete & Dropdown](assets/smart-dropdown.png)
 
@@ -14,23 +16,23 @@
     - `✦ Fix`: Instant diagnostic & AI fixes automatically surfaced when a command fails
     - `↻ Retry`: Re-suggests your original failed command after a fix succeeds
     - `↺ Recent`: Recent commands executed in the current project (max 3 in suggestion box)
-    - `✦ AI`: Smart, project-aware commands from OpenRouter `:free` models (max 12)
+    - `✦ AI`: Smart, project-aware commands from your configured AI provider (max 12)
     - `⚙ Script`: Auto-detected runnable scripts and targets (`package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, `docker-compose.yml`, etc.)
     - `⌘ Hist`: Global shell history
   - Pure Zsh in-memory + TSV cache lookups keep keystrokes instantaneous; AI calls run asynchronously via a FIFO + `zle -F` file descriptor.
 - **Automatic Folder Resume & Project-Only Tracking**
   - On terminal startup or `cd`, `cue` inspects the folder and only creates a context entry inside `~/.cue/projects/` if the folder is an actual software/infra project (git repo, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Makefile`, `Dockerfile`, etc.). Non-project folders like `$HOME` or `~/Downloads` are skipped cleanly.
   - Project analysis detects frameworks, scripts, Compose services, git changes, and file layout silently in the background without prompting for permission.
-- **Optional Project-Aware AI Suggestions (Recents & History by Default)**
+- **Optional Multi-Provider AI Suggestions (Recents & History by Default)**
   - Works out of the box with **zero API key required** using your project **Recents**, **Scripts**, **Shell History**, and instant offline **Error Diagnosis & Retry**.
-  - Want project-tailored AI predictions? Enable **AI Suggestions** anytime inside `cue settings` (or `cue settings --ai on`), paste your free [OpenRouter](https://openrouter.ai/keys) API key, and `cue` will generate contextual commands grounded in your repository tree, package manager, scripts, and git status.
+  - Want project-tailored AI predictions? Enable **AI Suggestions** inside `cue settings` (or `cue settings --ai on`), pick your provider (**OpenRouter `:free`**, **OpenAI / ChatGPT**, **Google Gemini**, **Anthropic Claude**, **Groq**, **DeepSeek**, or **Ollama Local**), and `cue` generates contextual commands grounded in your repository tree, package manager, scripts, and git status.
 - **Automatic Error Diagnosis, Dimmed Fix Ghost & Auto-Retry**
   - When a command fails (non-zero exit code, excluding `Ctrl+C`), `cue` diagnoses common issues locally in milliseconds (e.g., `No module named pytest`, missing binaries, `chmod +x`, git/npm/docker failures) and shows the fix command immediately as **dimmed inline ghost text** right on your prompt.
   - Press **`Tab`** to accept the fix command (or just start typing to write your own command), press `↓` to see alternate fixes, and once your fix succeeds, `cue` automatically suggests your original failed command next in dimmed text so you can re-run it with `Tab` + `Enter`.
 - **Priority Ordering**
   - Project suggestions prioritize: **active error fixes / post-fix retry** → **Recent project commands (max 3)** → **AI suggestions (max 12)** → **Scripts & Shell History**.
-- **Low-Latency OpenRouter Free Models + Automatic Fallback**
-  - Enforces `:free` models only (`is_free_model` rejects paid models), reuses HTTPS keep-alive connections via an optional localhost daemon (`cue daemon`), ranks models by observed response latency, and automatically switches on `429`/provider limits while preserving project & session context.
+- **Low-Latency Keep-Alive + Automatic Model & Provider Fallback**
+  - Reuses HTTPS keep-alive connections via an optional localhost daemon (`cue daemon`), ranks models by observed response latency, enforces `:free` models on OpenRouter, switches automatically across models on `429`/provider limits, and can even fall back to another configured provider key automatically.
 - **Cross-Platform (macOS, Linux & Windows)**
   - Native **Zsh** plugin (`cue.plugin.zsh`), **Bash** adapter (`bash/cue.bash` for Linux/macOS/WSL/Git Bash), and **PowerShell** adapter (`powershell/cue.ps1` + `install.ps1` for Windows 10/11 & `pwsh`).
 - **Self-Contained Context & Size Management (`~/.cue`)**
@@ -179,9 +181,30 @@ When you open your first interactive Zsh session with `cue` loaded (and `~/.cue/
 
 1. Local autocomplete (`Recents`, `Scripts`, `Shell history`, and instant `Error Fix & Retry`) is active immediately.
 2. Current folder is analyzed and added to `~/.cue/projects/` only if it is detected as a project.
-3. **AI Suggestions are optional and disabled by default.** To turn them on anytime, run `cue settings`, toggle **AI Suggestions** to Enabled, and enter a free OpenRouter API key from `https://openrouter.ai/keys` (or run `cue settings --ai on` and `cue token`).
+3. **AI Suggestions are optional and disabled by default.** To turn them on anytime, run `cue settings`, open **AI Suggestions**, choose your provider (**OpenRouter**, **OpenAI / ChatGPT**, **Google Gemini**, **Anthropic Claude**, **Groq**, **DeepSeek**, or **Ollama**), and add your API key (or run `cue settings --ai on --provider gemini` and `cue token`).
 
-You can re-run onboarding anytime with `cue onboard --force`, change your OpenRouter token anytime with `cue token` (or `cue token <new-key>`), or supply a key via `OPENROUTER_API_KEY` in your environment.
+You can re-run onboarding anytime with `cue onboard --force`, add/rotate keys anytime with `cue token --provider <name> [NEW_KEY]`, or supply keys via environment variables (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`).
+
+### Supported AI Providers
+
+| Provider ID | Platform | Protocol / Models | Environment Variable |
+| --- | --- | --- | --- |
+| `openrouter` | OpenRouter | `:free` models & auto-router enforced (`openrouter/free`, Gemma, Qwen, Llama) | `OPENROUTER_API_KEY` |
+| `openai` | OpenAI (ChatGPT) | `gpt-4o-mini`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-4o`, `o4-mini` | `OPENAI_API_KEY` |
+| `gemini` | Google Gemini | Native `generateContent` (`gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.5-pro`) | `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
+| `anthropic` | Anthropic (Claude) | Native Messages API (`claude-haiku-4-5`, `claude-sonnet-4-5`, `claude-3-5-haiku-latest`) | `ANTHROPIC_API_KEY` |
+| `groq` | Groq | Fast inference (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `qwen/qwen3-32b`) | `GROQ_API_KEY` |
+| `deepseek` | DeepSeek | `deepseek-chat`, `deepseek-reasoner` | `DEEPSEEK_API_KEY` |
+| `ollama` | Ollama (Local) | Offline localhost runtime (auto-discovers installed models, no API key required) | `OLLAMA_HOST` |
+
+```zsh
+# Examples: configure & switch providers anytime
+cue settings --ai on --provider gemini
+cue token --provider gemini AIza...
+cue token --provider openai sk-proj-...
+cue settings --provider claude
+cue settings --provider ollama
+```
 
 ---
 
@@ -205,28 +228,29 @@ You can re-run onboarding anytime with `cue onboard --force`, change your OpenRo
 ### Core Commands
 
 ```zsh
-cue status                         # AI toggle status, API status, active :free model, & storage usage
-cue settings [--ai on|off]         # Interactive TUI: AI Suggestions, Models, Token, Projects, Uninstall
+cue status                         # AI provider, API keys, active model, & storage usage
+cue settings [--ai on|off] [--provider NAME]
+                                   # Interactive TUI: AI Suggestions, Provider, Keys, Models, Projects
 cue ask "<prompt>"                 # Translate free-text prompt to runnable commands (alias: `cue prompt`)
 cue history [--limit N]            # Modern TUI table of recent commands in the current project
 cue onboard [--force]              # Run (or re-run) the interactive setup wizard
-cue token [NEW_KEY]                # Change your OpenRouter API token anytime (alias: `cue key`)
+cue token [-p PROVIDER] [NEW_KEY]  # Set or rotate API token for any provider (alias: `cue key`)
 cue fix [FAILED_CMD]               # Diagnose a failed command and show fix suggestions
 cue analyze [--dir PATH] [--force] [--no-ai] [--json]
                                     # Resume or create ~/.cue (or ~/.cuee) context & analyze folder
 cue suggest [--dir PATH] [--input TEXT] [--mode auto|complete|prompt] [--live] [--limit N] [--tsv | --json]
-                                    # Print ranked suggestions (add --live to query OpenRouter)
+                                    # Print ranked suggestions (add --live to query active AI provider)
 cue daemon [--ensure | --stop]     # Inspect, start, or stop the low-latency keep-alive daemon
 cue uninstall [--purge | --keep-data]
                                     # Remove cue hooks from shell profiles (and optionally delete data)
 ```
 
-### Free Model Management
+### AI Model Management
 
 ```zsh
-cue models                         # List :free models, active model, and cooldown status
-cue models --refresh               # Refresh live :free models list from OpenRouter
-cue models --use <model-id:free>   # Set preferred :free model (paid models are rejected)
+cue models [-p PROVIDER]           # List provider models, active model, and cooldown status
+cue models [-p PROVIDER] --refresh # Refresh live models list from provider API
+cue models [-p PROVIDER] --use <id># Set preferred model for active/target provider
 cue models --reset-health          # Clear all rate-limit/error cooldowns
 ```
 
@@ -258,10 +282,15 @@ Settings live in `~/.cue/config.json`:
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `openrouter_api_key` | `""` | OpenRouter API key (fallback to `$OPENROUTER_API_KEY` if unset) |
+| `ai_provider` | `"openrouter"` | Active AI provider (`openrouter`, `openai`, `gemini`, `anthropic`, `groq`, `deepseek`, `ollama`) |
+| `api_keys` | `{...}` | Per-provider API keys (falls back to provider env vars if unset) |
+| `provider_models` | `{...}` | Preferred model ID remembered per AI provider |
+| `auto_provider_fallback` | `true` | Automatically fall back across other configured provider keys on rate limits |
+| `openrouter_api_key` | `""` | Legacy OpenRouter API key (synced with `api_keys.openrouter`) |
 | `ai_suggestions_enabled` | `false` | Optional AI suggestions in autocomplete (`cue settings` to enable) |
-| `preferred_model` | `"openrouter/free"` | Preferred `:free` model ID |
-| `free_models_only` | `true` | Always enforced to `true` |
+| `preferred_model` | `"openrouter/free"` | Preferred model ID for active provider |
+| `free_models_only` | `true` | Enforced `:free` filter for OpenRouter |
+| `ollama_base_url` | `"http://127.0.0.1:11434"` | Local/remote Ollama server URL (overridable via `$OLLAMA_HOST`) |
 | `auto_analyze` | `true` | Automatically analyze detected projects on entry |
 | `ai_debounce_ms` | `350` | Debounce delay for live typing AI queries |
 | `max_project_bytes` | `262144` (256 KB) | Maximum size per project JSON file before compaction |
@@ -275,7 +304,8 @@ Supported environment variables:
 - `CUE_HOME`: Override storage directory (default: `~/.cue`).
 - `CUE_NO_ONBOARD=1`: Skip automatic onboarding prompt on shell startup.
 - `CUE_PYTHON`: Override Python executable path (default: `python3`).
-- `OPENROUTER_API_KEY`: Fallback API key if not stored in `config.json`.
+- `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`: Fallback provider API keys when unset in `config.json`.
+- `OLLAMA_HOST`: Custom host URL for Ollama local server.
 - `NO_COLOR`: Disable ANSI colors in CLI output.
 
 ---
@@ -286,9 +316,9 @@ Supported environment variables:
 
 ```text
 ~/.cue/
-├── config.json              # API key (0600), size caps, preferences
-├── state.json               # Active :free model & fallback telemetry
-├── models_cache.json        # Cached OpenRouter :free models (6h TTL)
+├── config.json              # Provider keys (0600), size caps, preferences
+├── state.json               # Active provider, model, & fallback telemetry
+├── models_cache.json        # Cached per-provider model lists (6h TTL)
 ├── model_health.json        # Cooldown tracking per model after 429/errors
 ├── cache/
 │   ├── dir_map.tsv          # Fast path -> project_id lookup for Zsh
@@ -316,7 +346,7 @@ cue/
 ├── zsh/                    # ZLE dropdown, hooks, and UI wrapper
 ├── bash/cue.bash           # Bash shell adapter
 ├── powershell/cue.ps1      # PowerShell adapter
-├── engine/                 # Python stdlib engine (CLI, daemon, context, OpenRouter, TUI)
+├── engine/                 # Python stdlib engine (CLI, daemon, context, multi-provider AI, TUI)
 ├── assets/                 # README screenshots
 └── tests/
     ├── test_cue_engine.py       # Python unit & integration tests

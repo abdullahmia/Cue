@@ -779,5 +779,259 @@ class TestImprovementsAndAiResilience(unittest.TestCase):
             self.assertFalse(_daemon_matches_current({"version": "0.0.1", "plugin_dir": str(ROOT)}))
 
 
+class TestMultiProviderAI(unittest.TestCase):
+    def test_provider_aliases_key_sync_and_sensitive_command_filtering(self) -> None:
+        from engine.config import (
+            get_active_provider,
+            get_provider_api_key,
+            get_provider_preferred_model,
+            normalize_provider,
+        )
+
+        self.assertEqual(normalize_provider("chatgpt"), "openai")
+        self.assertEqual(normalize_provider("Claude"), "anthropic")
+        self.assertEqual(normalize_provider("google"), "gemini")
+        self.assertEqual(normalize_provider("local"), "ollama")
+
+        self.assertTrue(is_sensitive_command("export GEMINI_API_KEY=AIzaSyDummyKey1234567890abcd"))
+        self.assertTrue(is_sensitive_command("export ANTHROPIC_API_KEY=sk-ant-api03-abcdef1234567890"))
+        self.assertTrue(is_sensitive_command("export GROQ_API_KEY=gsk_abcdef1234567890abcdef"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            save_config(
+                {
+                    "ai_provider": "gemini",
+                    "openrouter_api_key": "sk-or-v1-abc",
+                    "api_keys": {"gemini": "AIzaSyTestGeminiKey1234567890"},
+                    "preferred_model": "gemini-2.5-flash",
+                },
+                home=cue_home,
+            )
+            cfg = load_config(home=cue_home)
+            self.assertEqual(get_active_provider(cfg), "gemini")
+            self.assertEqual(get_provider_api_key(cfg, "gemini"), "AIzaSyTestGeminiKey1234567890")
+            self.assertEqual(get_provider_api_key(cfg, "openrouter"), "sk-or-v1-abc")
+            self.assertEqual(get_provider_preferred_model(cfg, "gemini"), "gemini-2.5-flash")
+
+            with mock.patch.dict(os.environ, {"CUE_HOME": str(cue_home), "OPENAI_API_KEY": "sk-proj-envtest1234567890"}):
+                cfg_env = load_config(home=cue_home)
+                self.assertEqual(get_provider_api_key(cfg_env, "openai"), "sk-proj-envtest1234567890")
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = cli_main(["config", "show"])
+                self.assertEqual(rc, 0)
+                shown = json.loads(buf.getvalue())
+                self.assertNotIn("AIzaSyTestGeminiKey1234567890", buf.getvalue())
+                self.assertNotIn("sk-or-v1-abc", buf.getvalue())
+                self.assertEqual(shown["ai_provider"], "gemini")
+
+    def test_openai_gemini_claude_and_ollama_protocols(self) -> None:
+        from engine.ai_client import AIClient
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            proj = Path(tmp) / "app"
+            proj.mkdir()
+            (proj / "package.json").write_text('{"name":"app","scripts":{"test":"vitest"}}', encoding="utf-8")
+
+            cm = ContextManager(home=cue_home)
+            ctx = cm.load_project(proj)
+            ctx["analysis"] = analyze_project(proj)
+
+            # 1. Google Gemini native payload & thought part filtering
+            save_config(
+                {
+                    "ai_provider": "gemini",
+                    "api_keys": {"gemini": "AIzaSyTestGemini1234567890"},
+                    "provider_models": {"gemini": "gemini-2.5-flash"},
+                },
+                home=cue_home,
+            )
+            gem_client = AIClient(home=cue_home)
+            captured_gem: list[tuple[str, dict[str, object], dict[str, str]]] = []
+
+            def fake_gem_post(url: str, payload: dict[str, object], headers: dict[str, str], timeout: float):
+                captured_gem.append((url, payload, headers))
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "internal thought", "thought": True},
+                                    {"text": json.dumps({"suggestions": [{"cmd": "npm test", "reason": "Run vitest"}], "summary": "Gemini ok"})},
+                                ]
+                            }
+                        }
+                    ]
+                }
+
+            with mock.patch.object(gem_client, "fetch_models", return_value=[{"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "context_length": 1000000}]):
+                with mock.patch.object(gem_client, "_post_json_keepalive", side_effect=fake_gem_post):
+                    res_gem = gem_client.generate_suggestions(ctx, partial_input="", cwd=str(proj), mode="analyze")
+
+            self.assertEqual(res_gem["provider"], "gemini")
+            self.assertEqual(res_gem["model"], "gemini-2.5-flash")
+            self.assertEqual(res_gem["suggestions"][0]["cmd"], "npm test")
+            self.assertIn(":generateContent", captured_gem[0][0])
+            self.assertEqual(captured_gem[0][2]["x-goog-api-key"], "AIzaSyTestGemini1234567890")
+            self.assertIn("systemInstruction", captured_gem[0][1])
+
+            # 2. Anthropic Claude native Messages API
+            save_config(
+                {
+                    "ai_provider": "anthropic",
+                    "api_keys": {"anthropic": "sk-ant-api03-testkey1234567890"},
+                    "provider_models": {"anthropic": "claude-haiku-4-5"},
+                },
+                home=cue_home,
+            )
+            cl_client = AIClient(home=cue_home)
+            captured_cl: list[tuple[str, dict[str, object], dict[str, str]]] = []
+
+            def fake_cl_post(url: str, payload: dict[str, object], headers: dict[str, str], timeout: float):
+                captured_cl.append((url, payload, headers))
+                return {
+                    "content": [
+                        {"type": "text", "text": json.dumps({"suggestions": [{"cmd": "git status", "reason": "Inspect repo"}], "summary": "Claude ok"})}
+                    ]
+                }
+
+            with mock.patch.object(cl_client, "fetch_models", return_value=[{"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "context_length": 200000}]):
+                with mock.patch.object(cl_client, "_post_json_keepalive", side_effect=fake_cl_post):
+                    res_cl = cl_client.generate_suggestions(ctx, partial_input="", cwd=str(proj), mode="analyze")
+
+            self.assertEqual(res_cl["provider"], "anthropic")
+            self.assertEqual(res_cl["suggestions"][0]["cmd"], "git status")
+            self.assertTrue(captured_cl[0][0].endswith("/v1/messages"))
+            self.assertEqual(captured_cl[0][2]["x-api-key"], "sk-ant-api03-testkey1234567890")
+            self.assertEqual(captured_cl[0][2]["anthropic-version"], "2023-06-01")
+
+            # 3. OpenAI ChatGPT reasoning model (o4-mini) uses max_completion_tokens
+            save_config(
+                {
+                    "ai_provider": "openai",
+                    "api_keys": {"openai": "sk-proj-openaitest1234567890"},
+                    "provider_models": {"openai": "o4-mini"},
+                },
+                home=cue_home,
+            )
+            oai_client = AIClient(home=cue_home)
+            captured_oai: list[dict[str, object]] = []
+
+            def fake_oai_post(url: str, payload: dict[str, object], headers: dict[str, str], timeout: float):
+                captured_oai.append(payload)
+                return {
+                    "choices": [
+                        {"message": {"content": json.dumps({"suggestions": [{"cmd": "npm run test", "reason": "Run tests"}], "summary": "OpenAI ok"})}}
+                    ]
+                }
+
+            with mock.patch.object(oai_client, "fetch_models", return_value=[{"id": "o4-mini", "name": "o4-mini", "context_length": 128000}]):
+                with mock.patch.object(oai_client, "_post_json_keepalive", side_effect=fake_oai_post):
+                    res_oai = oai_client.generate_suggestions(ctx, partial_input="", cwd=str(proj), mode="analyze")
+
+            self.assertEqual(res_oai["provider"], "openai")
+            self.assertIn("max_completion_tokens", captured_oai[0])
+            self.assertNotIn("temperature", captured_oai[0])
+
+            # 4. Ollama Local works with zero API key
+            save_config({"ai_provider": "ollama", "provider_models": {"ollama": "qwen2.5-coder:7b"}}, home=cue_home)
+            ol_client = AIClient(home=cue_home)
+            with mock.patch.object(ol_client, "fetch_models", return_value=[{"id": "qwen2.5-coder:7b", "name": "qwen2.5-coder:7b", "context_length": 32768}]):
+                with mock.patch.object(
+                    ol_client,
+                    "_post_json_keepalive",
+                    return_value={"choices": [{"message": {"content": '{"suggestions":[{"cmd":"vitest run","reason":"Run tests"}]}'}}]},
+                ):
+                    res_ol = ol_client.generate_suggestions(ctx, partial_input="", cwd=str(proj), mode="analyze")
+            self.assertEqual(res_ol["provider"], "ollama")
+            self.assertEqual(res_ol["suggestions"][0]["cmd"], "vitest run")
+
+    def test_cross_provider_fallback_and_cli_provider_commands(self) -> None:
+        import io as _io
+        import urllib.error
+        from engine.ai_client import AIClient
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            proj = Path(tmp) / "proj"
+            proj.mkdir()
+            (proj / "Makefile").write_text("test:\n\techo ok\n", encoding="utf-8")
+
+            save_config(
+                {
+                    "ai_provider": "openrouter",
+                    "openrouter_api_key": "sk-or-v1-test123",
+                    "api_keys": {
+                        "openrouter": "sk-or-v1-test123",
+                        "gemini": "AIzaSyFallbackGemini12345",
+                    },
+                    "auto_provider_fallback": True,
+                },
+                home=cue_home,
+            )
+            client = AIClient(home=cue_home)
+            cm = ContextManager(home=cue_home)
+            ctx = cm.load_project(proj)
+            ctx["analysis"] = analyze_project(proj)
+
+            def fail_openrouter_quota(api_key: str, model_id: str, messages: list[dict[str, str]], timeout: float = 9.0, max_tokens: int = 900):
+                raise urllib.error.HTTPError(
+                    url="https://openrouter.ai/api/v1/chat/completions",
+                    code=429,
+                    msg="Too Many Requests",
+                    hdrs=None,
+                    fp=_io.BytesIO(b'{"error":{"message":"Rate limit exceeded: free-models-per-day"}}'),
+                )
+
+            def ok_gemini(url: str, payload: dict[str, object], headers: dict[str, str], timeout: float):
+                return {
+                    "candidates": [
+                        {"content": {"parts": [{"text": '{"suggestions":[{"cmd":"make test","reason":"Run Makefile test target"}],"summary":"Switched to Gemini"}'}]}}
+                    ]
+                }
+
+            with mock.patch.object(client, "fetch_free_models", return_value=[{"id": m, "name": m, "context_length": 32768} for m in DEFAULT_FREE_MODELS]):
+                with mock.patch.object(client, "fetch_models", return_value=[{"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "context_length": 1000000}]):
+                    with mock.patch.object(client, "_post_chat_completion", side_effect=fail_openrouter_quota):
+                        with mock.patch.object(client, "_post_json_keepalive", side_effect=ok_gemini):
+                            res = client.generate_suggestions(ctx, partial_input="", cwd=str(proj), mode="analyze")
+
+            self.assertEqual(res["provider"], "gemini")
+            self.assertTrue(res["switched"])
+            self.assertEqual(res["suggestions"][0]["cmd"], "make test")
+            st = load_state(cue_home)
+            self.assertEqual(st["active_provider"], "gemini")
+            self.assertEqual(st["active_model"], "gemini-2.5-flash")
+
+            # CLI flags: settings --provider, token --provider / key prefix inference, and models --use
+            with mock.patch.dict(os.environ, {"CUE_HOME": str(cue_home)}):
+                with mock.patch("engine.cli.request_daemon", return_value=None):
+                    rc_p = cli_main(["settings", "--provider", "claude"])
+                    self.assertEqual(rc_p, 0)
+                    self.assertEqual(load_config(home=cue_home)["ai_provider"], "anthropic")
+
+                    with mock.patch.object(
+                        AIClient,
+                        "validate_key",
+                        return_value=(True, "Verified!", [{"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "context_length": 1000000}]),
+                    ):
+                        rc_t = cli_main(["token", "AIzaSyInferredGeminiKey123456"])
+                    self.assertEqual(rc_t, 0)
+                    self.assertEqual(load_config(home=cue_home)["ai_provider"], "gemini")
+
+                    rc_m = cli_main(["models", "-p", "openai", "--use", "gpt-4.1-mini"])
+                    self.assertEqual(rc_m, 0)
+                    self.assertEqual(load_config(home=cue_home)["ai_provider"], "openai")
+                    self.assertEqual(load_config(home=cue_home)["preferred_model"], "gpt-4.1-mini")
+
+                    # OpenRouter still rejects non-free models
+                    buf_err = io.StringIO()
+                    with redirect_stdout(buf_err):
+                        rc_bad = cli_main(["models", "-p", "openrouter", "--use", "openai/gpt-4o"])
+                    self.assertEqual(rc_bad, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

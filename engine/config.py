@@ -30,9 +30,157 @@ DEFAULT_FREE_MODELS = [
     "deepseek/deepseek-r1-0528:free",
 ]
 
+AI_PROVIDERS: dict[str, dict[str, Any]] = {
+    "openrouter": {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "short_name": "OpenRouter",
+        "protocol": "openai_compat",
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_vars": ("OPENROUTER_API_KEY",),
+        "key_url": "https://openrouter.ai/keys",
+        "key_hint": "sk-or-v1-...",
+        "requires_key": True,
+        "free_only": True,
+        "default_models": list(DEFAULT_FREE_MODELS),
+    },
+    "openai": {
+        "id": "openai",
+        "name": "OpenAI (ChatGPT)",
+        "short_name": "ChatGPT",
+        "protocol": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "env_vars": ("OPENAI_API_KEY",),
+        "key_url": "https://platform.openai.com/api-keys",
+        "key_hint": "sk-proj-...",
+        "requires_key": True,
+        "free_only": False,
+        "default_models": [
+            "gpt-4o-mini",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4o",
+            "o4-mini",
+            "gpt-4.1",
+        ],
+    },
+    "gemini": {
+        "id": "gemini",
+        "name": "Google Gemini",
+        "short_name": "Gemini",
+        "protocol": "gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "env_vars": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "key_url": "https://aistudio.google.com/apikey",
+        "key_hint": "AIza...",
+        "requires_key": True,
+        "free_only": False,
+        "default_models": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.5-pro",
+        ],
+    },
+    "anthropic": {
+        "id": "anthropic",
+        "name": "Anthropic (Claude)",
+        "short_name": "Claude",
+        "protocol": "anthropic",
+        "base_url": "https://api.anthropic.com/v1",
+        "env_vars": ("ANTHROPIC_API_KEY",),
+        "key_url": "https://console.anthropic.com/settings/keys",
+        "key_hint": "sk-ant-...",
+        "requires_key": True,
+        "free_only": False,
+        "default_models": [
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4-0",
+            "claude-3-5-haiku-latest",
+            "claude-3-7-sonnet-latest",
+            "claude-3-5-sonnet-latest",
+        ],
+    },
+    "groq": {
+        "id": "groq",
+        "name": "Groq",
+        "short_name": "Groq",
+        "protocol": "openai_compat",
+        "base_url": "https://api.groq.com/openai/v1",
+        "env_vars": ("GROQ_API_KEY",),
+        "key_url": "https://console.groq.com/keys",
+        "key_hint": "gsk_...",
+        "requires_key": True,
+        "free_only": False,
+        "default_models": [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "qwen/qwen3-32b",
+            "openai/gpt-oss-20b",
+            "gemma2-9b-it",
+        ],
+    },
+    "deepseek": {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "short_name": "DeepSeek",
+        "protocol": "openai_compat",
+        "base_url": "https://api.deepseek.com",
+        "env_vars": ("DEEPSEEK_API_KEY",),
+        "key_url": "https://platform.deepseek.com/api_keys",
+        "key_hint": "sk-...",
+        "requires_key": True,
+        "free_only": False,
+        "default_models": [
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+    },
+    "ollama": {
+        "id": "ollama",
+        "name": "Ollama (Local)",
+        "short_name": "Ollama",
+        "protocol": "ollama",
+        "base_url": "http://127.0.0.1:11434",
+        "env_vars": (),
+        "key_url": "https://ollama.com",
+        "key_hint": "local runtime (no key)",
+        "requires_key": False,
+        "free_only": False,
+        "default_models": [
+            "qwen2.5-coder:7b",
+            "llama3.2",
+            "mistral",
+        ],
+    },
+}
+
+PROVIDER_ALIASES: dict[str, str] = {
+    "openrouter": "openrouter",
+    "or": "openrouter",
+    "openai": "openai",
+    "chatgpt": "openai",
+    "gpt": "openai",
+    "gemini": "gemini",
+    "google": "gemini",
+    "google-gemini": "gemini",
+    "anthropic": "anthropic",
+    "claude": "anthropic",
+    "groq": "groq",
+    "deepseek": "deepseek",
+    "ollama": "ollama",
+    "local": "ollama",
+}
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "version": 1,
+    "ai_provider": "openrouter",
     "openrouter_api_key": "",
+    "api_keys": {pid: "" for pid, meta in AI_PROVIDERS.items() if meta["requires_key"]},
+    "provider_models": {pid: meta["default_models"][0] for pid, meta in AI_PROVIDERS.items()},
+    "ollama_base_url": "http://127.0.0.1:11434",
+    "auto_provider_fallback": True,
     "ai_suggestions_enabled": False,
     "preferred_model": "openrouter/free",
     "free_models_only": True,
@@ -47,6 +195,137 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "onboarded": False,
     "onboarded_at": 0,
 }
+
+
+def normalize_provider(name: str | None) -> str:
+    """Resolve provider name or common alias (chatgpt, claude, gemini, ...) to canonical ID."""
+    key = (name or "").strip().lower()
+    if not key:
+        return "openrouter"
+    return PROVIDER_ALIASES.get(key, key if key in AI_PROVIDERS else "openrouter")
+
+
+def is_valid_provider(name: str | None) -> bool:
+    """Return True if name resolves to a supported provider ID."""
+    key = (name or "").strip().lower()
+    return key in PROVIDER_ALIASES or key in AI_PROVIDERS
+
+
+def list_provider_ids() -> list[str]:
+    """Return ordered list of supported AI provider IDs."""
+    return list(AI_PROVIDERS.keys())
+
+
+def get_provider_meta(provider_id: str | None) -> dict[str, Any]:
+    """Return metadata dictionary for the normalized AI provider."""
+    pid = normalize_provider(provider_id)
+    return AI_PROVIDERS[pid]
+
+
+def get_active_provider(cfg: dict[str, Any]) -> str:
+    """Return the active normalized AI provider from config."""
+    return normalize_provider(str(cfg.get("ai_provider", "openrouter")))
+
+
+def get_provider_api_key(cfg: dict[str, Any], provider_id: str | None = None) -> str:
+    """Return the configured API key (or env var fallback) for a provider without mutating cfg."""
+    pid = normalize_provider(provider_id or str(cfg.get("ai_provider", "openrouter")))
+    meta = AI_PROVIDERS[pid]
+    if not meta["requires_key"]:
+        return ""
+    api_keys = cfg.get("api_keys")
+    if isinstance(api_keys, dict):
+        val = str(api_keys.get(pid, "") or "").strip()
+        if val:
+            return val
+    if pid == "openrouter":
+        legacy = str(cfg.get("openrouter_api_key", "") or "").strip()
+        if legacy:
+            return legacy
+    for env_name in meta.get("env_vars", ()):
+        env_val = os.environ.get(env_name, "").strip()
+        if env_val:
+            return env_val
+    return ""
+
+
+def set_provider_api_key(cfg: dict[str, Any], provider_id: str, api_key: str) -> None:
+    """Store an API key for provider_id cleanly (keeping openrouter_api_key in sync)."""
+    pid = normalize_provider(provider_id)
+    cleaned = api_key.strip()
+    api_keys = cfg.get("api_keys")
+    if not isinstance(api_keys, dict):
+        api_keys = {k: "" for k in DEFAULT_CONFIG["api_keys"]}
+    else:
+        api_keys = dict(api_keys)
+    api_keys[pid] = cleaned
+    cfg["api_keys"] = api_keys
+    if pid == "openrouter":
+        cfg["openrouter_api_key"] = cleaned
+
+
+def provider_is_configured(cfg: dict[str, Any], provider_id: str | None = None) -> bool:
+    """Return True if the selected (or active) provider can serve AI requests right now."""
+    pid = normalize_provider(provider_id or str(cfg.get("ai_provider", "openrouter")))
+    meta = AI_PROVIDERS[pid]
+    if not meta["requires_key"]:
+        return bool(get_ollama_base_url(cfg))
+    return bool(get_provider_api_key(cfg, pid))
+
+
+def get_configured_providers(cfg: dict[str, Any], include_local: bool = False) -> list[str]:
+    """Return list of provider IDs with configured credentials in priority order."""
+    active = get_active_provider(cfg)
+    ordered = [active] + [pid for pid in AI_PROVIDERS if pid != active]
+    out: list[str] = []
+    for pid in ordered:
+        meta = AI_PROVIDERS[pid]
+        if not meta["requires_key"]:
+            if include_local or pid == active:
+                out.append(pid)
+            continue
+        if get_provider_api_key(cfg, pid):
+            out.append(pid)
+    return out
+
+
+def get_provider_preferred_model(cfg: dict[str, Any], provider_id: str | None = None) -> str:
+    """Return preferred model ID for the given or active provider."""
+    pid = normalize_provider(provider_id or str(cfg.get("ai_provider", "openrouter")))
+    pm = cfg.get("provider_models")
+    if isinstance(pm, dict):
+        model = str(pm.get(pid, "") or "").strip()
+        if model:
+            return model
+    if pid == get_active_provider(cfg):
+        pref = str(cfg.get("preferred_model", "") or "").strip()
+        if pref:
+            return pref
+    return AI_PROVIDERS[pid]["default_models"][0]
+
+
+def set_provider_preferred_model(cfg: dict[str, Any], provider_id: str, model_id: str) -> None:
+    """Set preferred model for provider_id and keep preferred_model synced when active."""
+    pid = normalize_provider(provider_id)
+    pm = cfg.get("provider_models")
+    if not isinstance(pm, dict):
+        pm = dict(DEFAULT_CONFIG["provider_models"])
+    else:
+        pm = dict(pm)
+    pm[pid] = model_id.strip()
+    cfg["provider_models"] = pm
+    if pid == get_active_provider(cfg):
+        cfg["preferred_model"] = model_id.strip()
+
+
+def get_ollama_base_url(cfg: dict[str, Any]) -> str:
+    """Resolve local/remote Ollama base URL from config or OLLAMA_HOST."""
+    raw = str(cfg.get("ollama_base_url", "") or "").strip()
+    env_host = os.environ.get("OLLAMA_HOST", "").strip()
+    candidate = raw or env_host or "http://127.0.0.1:11434"
+    if not candidate.startswith(("http://", "https://")):
+        candidate = f"http://{candidate}"
+    return candidate.rstrip("/")
 
 
 def _is_cue_managed_dir(path: Path) -> bool:
@@ -186,28 +465,88 @@ def read_json_safe(path: Path, default: Any = None) -> Any:
         return default
 
 
+def _fresh_default_config() -> dict[str, Any]:
+    cfg = dict(DEFAULT_CONFIG)
+    cfg["api_keys"] = dict(DEFAULT_CONFIG["api_keys"])
+    cfg["provider_models"] = dict(DEFAULT_CONFIG["provider_models"])
+    return cfg
+
+
 def load_config(home: Path | None = None) -> dict[str, Any]:
     """Load config.json merged with defaults."""
     paths = ensure_cue_dirs(home)
     raw = read_json_safe(paths["config"], {})
     if not isinstance(raw, dict):
         raw = {}
-    cfg = dict(DEFAULT_CONFIG)
-    cfg.update(raw)
-    # Enforce free-models-only invariant
+    cfg = _fresh_default_config()
+    raw_keys = raw.get("api_keys")
+    raw_models = raw.get("provider_models")
+    cfg.update({k: v for k, v in raw.items() if k not in ("api_keys", "provider_models")})
+    if isinstance(raw_keys, dict):
+        for k, v in raw_keys.items():
+            cfg["api_keys"][normalize_provider(str(k))] = str(v or "").strip()
+    if isinstance(raw_models, dict):
+        for k, v in raw_models.items():
+            if v:
+                cfg["provider_models"][normalize_provider(str(k))] = str(v).strip()
+
+    cfg["ai_provider"] = normalize_provider(str(cfg.get("ai_provider", "openrouter")))
+    # Enforce free-models-only invariant for OpenRouter
     cfg["free_models_only"] = True
-    # Allow environment override for API key without mutating disk config
-    env_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if env_key and not cfg.get("openrouter_api_key"):
-        cfg["openrouter_api_key"] = env_key
+
+    # Bidirectional sync between legacy openrouter_api_key and api_keys['openrouter']
+    legacy_or = str(cfg.get("openrouter_api_key", "") or "").strip()
+    nested_or = str(cfg["api_keys"].get("openrouter", "") or "").strip()
+    if legacy_or and not nested_or:
+        cfg["api_keys"]["openrouter"] = legacy_or
+    elif nested_or and not legacy_or:
+        cfg["openrouter_api_key"] = nested_or
+
+    # Sync preferred_model with provider_models[ai_provider]
+    active_pid = cfg["ai_provider"]
+    raw_pref = str(raw.get("preferred_model", "") or "").strip()
+    if raw_pref and not (isinstance(raw_models, dict) and raw_models.get(active_pid)):
+        cfg["provider_models"][active_pid] = raw_pref
+    cfg["preferred_model"] = get_provider_preferred_model(cfg, active_pid)
+
+    # Allow environment override for OpenRouter key without mutating disk when unset
+    env_or = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if env_or and not cfg.get("openrouter_api_key"):
+        cfg["openrouter_api_key"] = env_or
+        cfg["api_keys"]["openrouter"] = env_or
     return cfg
 
 
 def save_config(cfg: dict[str, Any], home: Path | None = None) -> Path:
     """Persist configuration safely with 0600 permissions."""
     paths = ensure_cue_dirs(home)
-    merged = dict(DEFAULT_CONFIG)
-    merged.update(cfg)
+    merged = _fresh_default_config()
+    raw_keys = cfg.get("api_keys")
+    raw_models = cfg.get("provider_models")
+    merged.update({k: v for k, v in cfg.items() if k not in ("api_keys", "provider_models")})
+    if isinstance(raw_keys, dict):
+        for k, v in raw_keys.items():
+            merged["api_keys"][normalize_provider(str(k))] = str(v or "").strip()
+    if isinstance(raw_models, dict):
+        for k, v in raw_models.items():
+            if v:
+                merged["provider_models"][normalize_provider(str(k))] = str(v).strip()
+
+    merged["ai_provider"] = normalize_provider(str(merged.get("ai_provider", "openrouter")))
+    active_pid = merged["ai_provider"]
+
+    if "openrouter_api_key" in cfg and not (isinstance(raw_keys, dict) and "openrouter" in raw_keys):
+        merged["api_keys"]["openrouter"] = str(merged.get("openrouter_api_key", "") or "").strip()
+    elif isinstance(raw_keys, dict) and "openrouter" in raw_keys:
+        merged["openrouter_api_key"] = merged["api_keys"]["openrouter"]
+    else:
+        or_val = str(merged["api_keys"].get("openrouter", "") or merged.get("openrouter_api_key", "") or "").strip()
+        merged["openrouter_api_key"] = or_val
+        merged["api_keys"]["openrouter"] = or_val
+
+    if "preferred_model" in cfg and cfg["preferred_model"] and not (isinstance(raw_models, dict) and active_pid in raw_models):
+        merged["provider_models"][active_pid] = str(cfg["preferred_model"]).strip()
+    merged["preferred_model"] = get_provider_preferred_model(merged, active_pid)
     merged["free_models_only"] = True
     atomic_write_json(paths["config"], merged, private=True)
     return paths["config"]
@@ -220,6 +559,7 @@ def load_state(home: Path | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
     return {
+        "active_provider": normalize_provider(str(raw.get("active_provider", "openrouter"))),
         "active_model": raw.get("active_model", DEFAULT_FREE_MODELS[0]),
         "last_switch_reason": raw.get("last_switch_reason", ""),
         "last_switch_at": raw.get("last_switch_at", 0),

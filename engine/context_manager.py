@@ -23,7 +23,9 @@ from .project_analyzer import is_project_directory
 SENSITIVE_CMD_PATTERNS = [
     re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd|auth)\s*="),
     re.compile(r"sk-or-v1-[A-Za-z0-9_-]+"),
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{20,}"),
+    re.compile(r"gsk_[A-Za-z0-9_-]{20,}"),
     re.compile(r"ghp_[A-Za-z0-9]{20,}"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._-]{16,}"),
 ]

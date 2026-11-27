@@ -6,7 +6,7 @@ if [[ -z "$ZSH_VERSION" ]]; then
 fi
 
 # Resolve plugin root directory reliably
-export CUE_VERSION="0.1.0"
+export CUE_VERSION="0.2.0"
 export CUE_PLUGIN_DIR="${0:A:h}"
 
 # Resolve ~/.cue (or ~/.cuee if an unrelated ~/.cue already existed beforehand)

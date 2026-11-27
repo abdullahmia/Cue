@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import append_log, atomic_write_json, ensure_cue_dirs, load_config, read_json_safe
+from .config import (
+    append_log,
+    atomic_write_json,
+    ensure_cue_dirs,
+    get_configured_providers,
+    load_config,
+    provider_is_configured,
+    read_json_safe,
+)
 from .context_manager import ContextManager, make_project_id, resolve_project_root
 from .error_fixer import diagnose_command_failure
 from .openrouter_client import AllModelsExhaustedError, AuthError, OpenRouterClient
@@ -204,7 +212,9 @@ def run_daemon_server(home: Path | None = None) -> int:
 
                 directory = Path(body.get("dir") or os.getcwd()).expanduser().resolve()
                 ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
-                has_key = bool(cfg.get("openrouter_api_key"))
+                has_key = provider_is_configured(cfg) or (
+                    bool(cfg.get("auto_provider_fallback", True)) and bool(get_configured_providers(cfg))
+                )
 
                 if self.path == "/analyze":
                     root = resolve_project_root(directory)
@@ -337,7 +347,7 @@ def run_daemon_server(home: Path | None = None) -> int:
                     prompt_err = ""
                     can_call_ai = has_key and (req_mode == "prompt" or ai_enabled)
                     if body.get("live") and req_mode == "prompt" and not has_key:
-                        prompt_err = "OpenRouter API key not configured (enable AI in `cue settings` or run: cue token)"
+                        prompt_err = "No AI provider configured (enable AI in `cue settings` or run: cue token)"
                     elif body.get("live") and can_call_ai:
                         try:
                             res = client.generate_suggestions(
