@@ -17,11 +17,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .config import append_log, atomic_write_json, ensure_cue_dirs, load_config, read_json_safe
-from .context_manager import ContextManager, resolve_project_root
+from .context_manager import ContextManager, make_project_id, resolve_project_root
 from .error_fixer import diagnose_command_failure
 from .openrouter_client import AllModelsExhaustedError, AuthError, OpenRouterClient
-from .project_analyzer import analyze_project, compute_fingerprint
+from .project_analyzer import analyze_project, compute_fingerprint, is_project_directory
 from .suggester import build_ranked_suggestions, write_zsh_suggestion_cache
 
 DAEMON_IDLE_TIMEOUT = 1800  # Exit after 30 minutes of inactivity
@@ -29,6 +30,25 @@ DAEMON_IDLE_TIMEOUT = 1800  # Exit after 30 minutes of inactivity
 
 def get_daemon_meta_path(home: Path | None = None) -> Path:
     return ensure_cue_dirs(home)["cache"] / "daemon.json"
+
+
+def _daemon_matches_current(meta: dict[str, Any]) -> bool:
+    """Return True if running daemon matches the current cue version and plugin path."""
+    root_dir = str(Path(__file__).resolve().parent.parent)
+    return meta.get("version") == __version__ and meta.get("plugin_dir") == root_dir
+
+
+def _stop_daemon_meta(meta: dict[str, Any], meta_path: Path) -> None:
+    pid = int(meta.get("pid", 0) or 0)
+    if pid:
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+    try:
+        meta_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _is_daemon_alive(meta: dict[str, Any]) -> bool:
@@ -51,11 +71,16 @@ def request_daemon(
     endpoint: str,
     payload: dict[str, Any],
     home: Path | None = None,
-    timeout: float = 9.0,
+    timeout: float = 12.0,
 ) -> dict[str, Any] | None:
     """Send a fast localhost request to the cue keep-alive daemon if active."""
-    meta = read_json_safe(get_daemon_meta_path(home), {})
+    meta_path = get_daemon_meta_path(home)
+    meta = read_json_safe(meta_path, {})
     if not isinstance(meta, dict) or not meta.get("port") or not meta.get("token"):
+        return None
+    if not _daemon_matches_current(meta):
+        _stop_daemon_meta(meta, meta_path)
+        ensure_daemon_running(home)
         return None
     try:
         conn = http.client.HTTPConnection("127.0.0.1", int(meta["port"]), timeout=timeout)
@@ -80,10 +105,13 @@ def request_daemon(
 
 
 def ensure_daemon_running(home: Path | None = None) -> bool:
-    """Start the background keep-alive daemon detached if not already running."""
-    meta = read_json_safe(get_daemon_meta_path(home), {})
+    """Start the background keep-alive daemon detached if not already running cleanly."""
+    meta_path = get_daemon_meta_path(home)
+    meta = read_json_safe(meta_path, {})
     if isinstance(meta, dict) and _is_daemon_alive(meta):
-        return True
+        if _daemon_matches_current(meta):
+            return True
+        _stop_daemon_meta(meta, meta_path)
 
     root_dir = Path(__file__).resolve().parent.parent
     env = os.environ.copy()
@@ -175,13 +203,30 @@ def run_daemon_server(home: Path | None = None) -> int:
                     return
 
                 directory = Path(body.get("dir") or os.getcwd()).expanduser().resolve()
+                ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+                has_key = bool(cfg.get("openrouter_api_key"))
 
                 if self.path == "/analyze":
-                    ctx = cm.load_project(directory)
                     root = resolve_project_root(directory)
+                    force = bool(body.get("force", False))
+                    has_existing = cm.has_project(root)
+                    if not force and not has_existing and not is_project_directory(root):
+                        self._send_json(
+                            200,
+                            {
+                                "project_id": "",
+                                "is_project": False,
+                                "skipped": True,
+                                "cache_file": "",
+                                "analysis": {"root": str(root), "name": root.name, "is_project": False, "stacks": []},
+                                "suggestions": [],
+                            },
+                        )
+                        return
+
+                    ctx = cm.load_project(directory)
                     fp = compute_fingerprint(root)
                     now = int(time.time())
-                    force = bool(body.get("force", False))
                     needs_ai = (
                         force
                         or not ctx.get("cached_suggestions")
@@ -192,7 +237,7 @@ def run_daemon_server(home: Path | None = None) -> int:
                         ctx["analysis"] = analyze_project(root)
                         ctx["fingerprint"] = fp
                         ctx["last_analyzed"] = now
-                    if needs_ai and not body.get("no_ai") and cfg.get("openrouter_api_key"):
+                    if needs_ai and not body.get("no_ai") and ai_enabled and has_key:
                         try:
                             res = client.generate_suggestions(ctx, cwd=str(directory), mode="analyze", timeout=8.0)
                             ctx["cached_suggestions"] = res["suggestions"]
@@ -202,14 +247,16 @@ def run_daemon_server(home: Path | None = None) -> int:
                         except (AuthError, AllModelsExhaustedError) as exc:
                             append_log(f"Daemon analyze AI skipped: {exc}", "WARN", cue_home)
                     cm.save_project(ctx)
-                    cache_file = write_zsh_suggestion_cache(ctx, home=cue_home)
+                    cache_file = write_zsh_suggestion_cache(ctx, home=cue_home, ai_enabled=ai_enabled)
                     self._send_json(
                         200,
                         {
                             "project_id": ctx["project_id"],
+                            "is_project": True,
+                            "skipped": False,
                             "cache_file": str(cache_file),
                             "analysis": ctx.get("analysis", {}),
-                            "suggestions": build_ranked_suggestions(ctx),
+                            "suggestions": build_ranked_suggestions(ctx, ai_enabled=ai_enabled),
                         },
                     )
                     return
@@ -217,9 +264,23 @@ def run_daemon_server(home: Path | None = None) -> int:
                 if self.path == "/record":
                     cmd_str = str(body.get("command", ""))
                     exit_code = int(body.get("exit_code", 0))
-                    ctx = cm.record_command(directory, cmd_str, exit_code=exit_code)
+                    ctx = cm.record_command(directory, cmd_str, exit_code=exit_code, project_only=True)
                     if ctx is None:
-                        self._send_json(200, {"recorded": False, "fixes": []})
+                        fixes_only: list[dict[str, str]] = []
+                        diag_text = ""
+                        if exit_code not in (0, 130) and cmd_str.strip() and not cmd_str.strip().startswith("cue"):
+                            diag = diagnose_command_failure(cmd_str.strip(), exit_code, directory)
+                            fixes_only = list(diag.get("fixes", []))
+                            diag_text = str(diag.get("diagnosis", ""))
+                        self._send_json(
+                            200,
+                            {
+                                "recorded": False,
+                                "skipped": True,
+                                "last_error": {"cmd": cmd_str.strip(), "exit_code": exit_code, "diagnosis": diag_text, "fixes": fixes_only} if fixes_only else {},
+                                "fixes": fixes_only,
+                            },
+                        )
                         return
                     if exit_code not in (0, 130):
                         diag = diagnose_command_failure(cmd_str, exit_code, directory, ctx.get("analysis"))
@@ -232,7 +293,7 @@ def run_daemon_server(home: Path | None = None) -> int:
                                 "fixes": diag["fixes"],
                                 "ts": int(time.time()),
                             }
-                            if cfg.get("openrouter_api_key") and body.get("ai_fix", True):
+                            if ai_enabled and has_key and body.get("ai_fix", True):
                                 try:
                                     res = client.generate_suggestions(
                                         ctx,
@@ -260,21 +321,24 @@ def run_daemon_server(home: Path | None = None) -> int:
                             ctx["pending_retry"] = {}
                         ctx["last_error"] = {}
                     cm.save_project(ctx)
-                    write_zsh_suggestion_cache(ctx, home=cue_home)
+                    write_zsh_suggestion_cache(ctx, home=cue_home, ai_enabled=ai_enabled)
                     self._send_json(200, {"recorded": True, "last_error": ctx.get("last_error", {}), "pending_retry": ctx.get("pending_retry", {})})
                     return
 
                 if self.path == "/suggest":
+                    root = resolve_project_root(directory)
+                    is_tracked = cm.has_project(root) or is_project_directory(root)
                     ctx = cm.load_project(directory)
                     if not ctx.get("analysis"):
-                        ctx["analysis"] = analyze_project(resolve_project_root(directory))
+                        ctx["analysis"] = analyze_project(root)
                         ctx["fingerprint"] = ctx["analysis"].get("fingerprint", "")
                     query = str(body.get("input", ""))
                     req_mode = str(body.get("mode", "")).strip() or ("complete" if query else "analyze")
                     prompt_err = ""
-                    if body.get("live") and not cfg.get("openrouter_api_key") and req_mode == "prompt":
-                        prompt_err = "OpenRouter API key not configured (run: cue token)"
-                    elif body.get("live") and cfg.get("openrouter_api_key"):
+                    can_call_ai = has_key and (req_mode == "prompt" or ai_enabled)
+                    if body.get("live") and req_mode == "prompt" and not has_key:
+                        prompt_err = "OpenRouter API key not configured (enable AI in `cue settings` or run: cue token)"
+                    elif body.get("live") and can_call_ai:
                         try:
                             res = client.generate_suggestions(
                                 ctx,
@@ -289,9 +353,10 @@ def run_daemon_server(home: Path | None = None) -> int:
                                 if old.get("cmd") not in seen:
                                     merged.append(old)
                             ctx["cached_suggestions"] = merged[:16]
-                            cm.save_project(ctx)
+                            if is_tracked:
+                                cm.save_project(ctx)
                             if req_mode == "prompt":
-                                cache_file = write_zsh_suggestion_cache(ctx, home=cue_home)
+                                cache_file = write_zsh_suggestion_cache(ctx, home=cue_home, ai_enabled=ai_enabled) if is_tracked else ""
                                 self._send_json(
                                     200,
                                     {
@@ -305,10 +370,10 @@ def run_daemon_server(home: Path | None = None) -> int:
                         except (AuthError, AllModelsExhaustedError) as exc:
                             prompt_err = str(exc)
                             append_log(f"Daemon suggest error: {exc}", "WARN", cue_home)
-                    cache_file = write_zsh_suggestion_cache(ctx, home=cue_home)
+                    cache_file = write_zsh_suggestion_cache(ctx, home=cue_home, ai_enabled=ai_enabled) if is_tracked else ""
                     payload: dict[str, Any] = {
                         "cache_file": str(cache_file),
-                        "suggestions": build_ranked_suggestions(ctx, partial_input=query, limit=int(body.get("limit", 12))),
+                        "suggestions": build_ranked_suggestions(ctx, partial_input=query, limit=int(body.get("limit", 12)), ai_enabled=ai_enabled),
                     }
                     if req_mode == "prompt" and prompt_err:
                         payload["error"] = prompt_err
@@ -319,7 +384,18 @@ def run_daemon_server(home: Path | None = None) -> int:
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = server.server_address[1]
-    atomic_write_json(meta_path, {"pid": os.getpid(), "port": port, "token": token, "started_at": int(time.time())}, private=True)
+    atomic_write_json(
+        meta_path,
+        {
+            "pid": os.getpid(),
+            "port": port,
+            "token": token,
+            "version": __version__,
+            "plugin_dir": str(Path(__file__).resolve().parent.parent),
+            "started_at": int(time.time()),
+        },
+        private=True,
+    )
 
     def _watchdog() -> None:
         while True:

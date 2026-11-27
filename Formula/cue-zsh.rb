@@ -1,8 +1,8 @@
 class CueZsh < Formula
   desc "Smart AI Zsh autocomplete, project history dropdown, and CLI assistant"
   homepage "https://github.com/abdullahmia/Cue"
-  url "https://github.com/abdullahmia/Cue.git", tag: "v0.0.1"
-  version "0.0.1"
+  url "https://github.com/abdullahmia/Cue.git", tag: "v0.1.0"
+  version "0.1.0"
 
   uses_from_macos "python"
 

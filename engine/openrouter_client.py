@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -95,13 +96,51 @@ def is_free_model(model_id: str, model_meta: dict[str, Any] | None = None) -> bo
     return False
 
 
+def _recover_truncated_suggestions(cleaned: str) -> dict[str, Any] | None:
+    """Recover valid suggestions and summary even if JSON was truncated near max_tokens."""
+    if '"suggestions"' not in cleaned:
+        return None
+    items: list[dict[str, str]] = []
+    # Decode complete JSON objects inside the suggestions array even if closing brackets are missing
+    for m in re.finditer(r"\{[^{}]*\}", cleaned):
+        chunk = m.group(0)
+        if '"cmd"' not in chunk:
+            continue
+        try:
+            obj = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("cmd"), str):
+            items.append(
+                {
+                    "cmd": obj["cmd"],
+                    "reason": str(obj.get("reason", "")),
+                }
+            )
+    if not items:
+        return None
+    summary = ""
+    sum_m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+    if sum_m:
+        try:
+            summary = json.loads(f'"{sum_m.group(1)}"')
+        except json.JSONDecodeError:
+            summary = sum_m.group(1)
+    return {"suggestions": items, "summary": summary}
+
+
 def _extract_json_object(text: str) -> dict[str, Any] | None:
-    """Parse JSON from model output, tolerating markdown fences or surrounding prose."""
+    """Parse JSON from model output, tolerating thinking blocks, fences, prose, or tail truncation."""
     cleaned = text.strip()
     if not cleaned:
         return None
     # Strip <think>...</think> blocks emitted by reasoning models like deepseek-r1
     cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL).strip()
+    if "<think>" in cleaned and "</think>" not in cleaned:
+        # Handle unclosed <think> block if a JSON object still follows or sits inside
+        brace_pos = cleaned.find('{"suggestions"')
+        if brace_pos != -1:
+            cleaned = cleaned[brace_pos:]
 
     try:
         parsed = json.loads(cleaned)
@@ -128,7 +167,97 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
                 return parsed
         except json.JSONDecodeError:
             pass
-    return None
+
+    return _recover_truncated_suggestions(cleaned)
+
+
+TRIVIAL_FILLER_CMDS = {"ls", "ls -la", "ls -l", "pwd", "clear", "cd", "cd ..", "whoami", "date"}
+UNSAFE_CMD_PATTERNS = (
+    re.compile(r"(^|\s)rm\s+-rf\s+(/|\~|\$HOME)(\s|$)"),
+    re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"),
+    re.compile(r"(^|\s)mkfs\.[a-z0-9]+"),
+)
+PLACEHOLDER_RE = re.compile(r"<[a-zA-Z0-9_-]{2,24}>")
+
+
+def _fold_system_into_user(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Merge system instructions into the first user message for models without system-role support."""
+    sys_parts = [m["content"] for m in messages if m.get("role") == "system" and m.get("content")]
+    non_sys = [dict(m) for m in messages if m.get("role") != "system"]
+    if not sys_parts:
+        return non_sys
+    prefix = "Instructions:\n" + "\n".join(sys_parts) + "\n\nRequest:\n"
+    for msg in non_sys:
+        if msg.get("role") == "user":
+            msg["content"] = prefix + msg.get("content", "")
+            return non_sys
+    return [{"role": "user", "content": prefix}]
+
+
+def _clean_cmd_text(raw: str) -> str:
+    cmd = raw.strip()
+    if cmd.startswith("```") and cmd.endswith("```"):
+        cmd = cmd.strip("`").strip()
+    elif cmd.startswith("`") and cmd.endswith("`") and cmd.count("`") == 2:
+        cmd = cmd[1:-1].strip()
+    cmd = re.sub(r"^\d+\.\s+", "", cmd)
+    if cmd.startswith("$ "):
+        cmd = cmd[2:].strip()
+    return cmd
+
+
+def _sanitize_suggestions(
+    raw_items: list[Any],
+    partial_input: str = "",
+    mode: str = "analyze",
+) -> list[dict[str, str]]:
+    """Filter unsafe, placeholder, duplicate, or off-topic suggestions cleanly."""
+    query = partial_input.strip().lower()
+    seen: set[str] = set()
+    cleaned: list[dict[str, str]] = []
+
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        cmd = _clean_cmd_text(str(item.get("cmd", "")))
+        reason = " ".join(str(item.get("reason", "")).strip().split())
+        if not cmd or "\n" in cmd or len(cmd) > 220:
+            continue
+        if any(p.search(cmd) for p in UNSAFE_CMD_PATTERNS):
+            continue
+        if "<" not in query and PLACEHOLDER_RE.search(cmd):
+            continue
+        norm_key = " ".join(cmd.lower().split())
+        if norm_key in seen:
+            continue
+        if query and norm_key == query:
+            continue
+        if mode in ("analyze", "complete") and norm_key in TRIVIAL_FILLER_CMDS:
+            if not query or not norm_key.startswith(query):
+                continue
+        seen.add(norm_key)
+        cleaned.append({"cmd": cmd, "reason": reason[:90] or "Project command"})
+
+    if mode == "complete" and query:
+        tokens = [t for t in query.split() if t]
+
+        def _rel_key(entry: dict[str, str]) -> tuple[int, int]:
+            lc = entry["cmd"].lower()
+            if lc.startswith(query):
+                return (0, len(lc))
+            if query in lc:
+                return (1, len(lc))
+            pos = 0
+            for tok in tokens:
+                idx = lc.find(tok, pos)
+                if idx == -1:
+                    return (3, len(lc))
+                pos = idx + len(tok)
+            return (2, len(lc))
+
+        cleaned.sort(key=_rel_key)
+
+    return cleaned[:12]
 
 
 class OpenRouterClient:
@@ -139,7 +268,8 @@ class OpenRouterClient:
         self.home = self.paths["root"]
         self.config = config or load_config(self.home)
         self._ssl_context = _build_ssl_context()
-        self._http_conn: http.client.HTTPSConnection | None = None
+        self._tls = threading.local()
+        self._health_lock = threading.Lock()
 
     def _headers(self, api_key: str) -> dict[str, str]:
         return {
@@ -243,29 +373,34 @@ class OpenRouterClient:
 
     def mark_model_cooldown(self, model_id: str, reason: str, cooldown_seconds: int) -> None:
         """Record a temporary cooldown on a free model when it hits a limit or fails."""
-        health = self._load_health()
-        prev = health.get(model_id, {}) if isinstance(health.get(model_id), dict) else {}
-        health[model_id] = {
-            "cooldown_until": int(time.time()) + cooldown_seconds,
-            "reason": reason[:200],
-            "latency_ms": prev.get("latency_ms", 0),
-            "updated_at": int(time.time()),
-        }
-        self._save_health(health)
+        # Meta-router openrouter/free picks a different backend per request, so keep its cooldown brief
+        if model_id == "openrouter/free":
+            cooldown_seconds = min(cooldown_seconds, 15)
+        with self._health_lock:
+            health = self._load_health()
+            prev = health.get(model_id, {}) if isinstance(health.get(model_id), dict) else {}
+            health[model_id] = {
+                "cooldown_until": int(time.time()) + cooldown_seconds,
+                "reason": reason[:200],
+                "latency_ms": prev.get("latency_ms", 0),
+                "updated_at": int(time.time()),
+            }
+            self._save_health(health)
 
     def record_model_latency(self, model_id: str, latency_ms: float) -> None:
         """Track rolling average latency (EMA) to prefer fastest healthy free models."""
-        health = self._load_health()
-        prev = health.get(model_id, {}) if isinstance(health.get(model_id), dict) else {}
-        old_ms = float(prev.get("latency_ms", 0) or 0)
-        ema_ms = round(latency_ms if old_ms <= 0 else (old_ms * 0.6 + latency_ms * 0.4), 1)
-        health[model_id] = {
-            "cooldown_until": 0,
-            "reason": "",
-            "latency_ms": ema_ms,
-            "updated_at": int(time.time()),
-        }
-        self._save_health(health)
+        with self._health_lock:
+            health = self._load_health()
+            prev = health.get(model_id, {}) if isinstance(health.get(model_id), dict) else {}
+            old_ms = float(prev.get("latency_ms", 0) or 0)
+            ema_ms = round(latency_ms if old_ms <= 0 else (old_ms * 0.6 + latency_ms * 0.4), 1)
+            health[model_id] = {
+                "cooldown_until": 0,
+                "reason": "",
+                "latency_ms": ema_ms,
+                "updated_at": int(time.time()),
+            }
+            self._save_health(health)
 
     def clear_model_health(self) -> None:
         """Clear all model cooldowns."""
@@ -287,11 +422,13 @@ class OpenRouterClient:
             if candidate and is_free_model(candidate) and candidate in available_ids and candidate not in ordered:
                 ordered.append(candidate)
 
-        # Append any other discovered free models sorted by larger context length
+        # Append any other discovered free models, preferring text/coder models over vision (-vl)
         extra = sorted(
             [m for m in free_models if m["id"] not in ordered and is_free_model(m["id"], m)],
-            key=lambda m: int(m.get("context_length", 0)),
-            reverse=True,
+            key=lambda m: (
+                1 if ("-vl" in m["id"].lower() or "vision" in m["id"].lower()) else 0,
+                -int(m.get("context_length", 0)),
+            ),
         )
         for m in extra:
             ordered.append(m["id"])
@@ -337,18 +474,39 @@ class OpenRouterClient:
             )
         return rows
 
+    def _get_conn(self, timeout: float) -> http.client.HTTPSConnection:
+        conn = getattr(self._tls, "conn", None)
+        if conn is None:
+            conn = http.client.HTTPSConnection(
+                "openrouter.ai", 443, timeout=timeout, context=self._ssl_context
+            )
+            self._tls.conn = conn
+        else:
+            conn.timeout = timeout
+        return conn
+
+    def _close_conn(self) -> None:
+        conn = getattr(self._tls, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except OSError:
+                pass
+            self._tls.conn = None
+
     def _post_chat_completion(
         self,
         api_key: str,
         model_id: str,
         messages: list[dict[str, str]],
         timeout: float = 9.0,
+        max_tokens: int = 900,
     ) -> dict[str, Any]:
         payload = {
             "model": model_id,
             "messages": messages,
             "temperature": 0.15,
-            "max_tokens": 260,
+            "max_tokens": max_tokens,
         }
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         headers = self._headers(api_key)
@@ -356,14 +514,9 @@ class OpenRouterClient:
 
         for attempt in range(2):
             try:
-                if self._http_conn is None:
-                    self._http_conn = http.client.HTTPSConnection(
-                        "openrouter.ai", 443, timeout=timeout, context=self._ssl_context
-                    )
-                else:
-                    self._http_conn.timeout = timeout
-                self._http_conn.request("POST", "/api/v1/chat/completions", body=body, headers=headers)
-                resp = self._http_conn.getresponse()
+                conn = self._get_conn(timeout)
+                conn.request("POST", "/api/v1/chat/completions", body=body, headers=headers)
+                resp = conn.getresponse()
                 raw_bytes = resp.read()
                 raw_text = raw_bytes.decode("utf-8", errors="replace")
                 if resp.status >= 400:
@@ -376,32 +529,142 @@ class OpenRouterClient:
                     )
                 return json.loads(raw_text)
             except (http.client.HTTPException, BrokenPipeError, ConnectionResetError):
-                if self._http_conn is not None:
-                    try:
-                        self._http_conn.close()
-                    except OSError:
-                        pass
-                    self._http_conn = None
+                self._close_conn()
                 if attempt == 1:
                     raise
         raise TimeoutError("OpenRouter keep-alive request failed")
 
+    @staticmethod
+    def _extract_error_detail(body: str) -> str:
+        """Extract concise human-readable error message from OpenRouter JSON error payload."""
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and isinstance(parsed.get("error"), dict):
+                raw_msg = str(parsed["error"].get("metadata", {}).get("raw", "") or parsed["error"].get("message", ""))
+                if raw_msg:
+                    return " ".join(raw_msg.splitlines()).strip()[:90]
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            pass
+        return " ".join(body.splitlines()).strip()[:90]
+
     def _classify_failure(self, code: int | None, body: str) -> tuple[bool, int, str]:
         """Return (is_auth_fatal, cooldown_seconds, short_reason)."""
-        lower = body.lower()
+        detail = self._extract_error_detail(body)
+        lower = (detail + " " + body).lower()
         if code in (401, 403):
             return True, 0, f"HTTP {code}: invalid or unauthorized API key"
+        if "data policy" in lower or "privacy" in lower:
+            return True, 0, "OpenRouter privacy blocks :free endpoints (enable at openrouter.ai/settings/privacy)"
         if code == 429 or "rate limit" in lower or "quota" in lower or "limit exceeded" in lower:
+            if "free-models-per-day" in lower or ("10 credits" in lower and "1000" in lower):
+                return True, 0, "OpenRouter daily :free cap reached (50/day without $10 credits; resets 00:00 UTC)"
+            if "free-models-per-min" in lower:
+                return True, 0, "OpenRouter 20 req/min :free rate limit reached; wait ~60s"
             is_daily = "daily" in lower or "per-day" in lower or "day" in lower or "credits" in lower
-            cooldown = 6 * 3600 if is_daily else 10 * 60
-            return False, cooldown, f"Rate/quota limit reached ({code or 'API'})"
+            cooldown = 6 * 3600 if is_daily else 90
+            short_detail = detail or f"HTTP {code or '429'}"
+            return False, cooldown, f"429 {short_detail}"
         if code == 404 or "no endpoints found" in lower or "not found" in lower:
             return False, 24 * 3600, f"Model unavailable ({code or '404'})"
         if code == 402:
             return False, 24 * 3600, "Model requires payment (skipping to free model)"
         if code in (500, 502, 503, 504) or "overload" in lower or "timeout" in lower:
-            return False, 5 * 60, f"Provider transient error ({code or 'timeout'})"
-        return False, 5 * 60, f"Model error ({code or 'unknown'}): {body[:80]}"
+            return False, 2 * 60, f"Provider transient error ({code or 'timeout'})"
+        return False, 3 * 60, f"Model error ({code or 'unknown'}): {detail[:70]}"
+
+    @staticmethod
+    def _merge_system_into_user(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Fold any 'system' messages into the first user message for models without developer-role support."""
+        sys_parts: list[str] = []
+        rest: list[dict[str, str]] = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = str(msg.get("content", "")).strip()
+                if content:
+                    sys_parts.append(content)
+            else:
+                rest.append(dict(msg))
+        if not sys_parts:
+            return messages
+        prefix = "Instructions:\n" + "\n".join(sys_parts) + "\n\nRequest:\n"
+        if rest and rest[0].get("role") == "user":
+            rest[0]["content"] = prefix + str(rest[0].get("content", ""))
+        else:
+            rest.insert(0, {"role": "user", "content": prefix})
+        return rest
+
+    @staticmethod
+    def _needs_system_role_fallback(code: int | None, body: str) -> bool:
+        lower = body.lower()
+        return code == 400 and (
+            "developer instruction" in lower
+            or "system message" in lower
+            or "system role" in lower
+            or "role 'system'" in lower
+        )
+
+    @staticmethod
+    def _sanitize_command(raw_cmd: str) -> str:
+        cmd = " ".join(str(raw_cmd).strip().splitlines()).strip()
+        if not cmd:
+            return ""
+        # Strip accidental markdown backticks or leading '$ ' prompt copied by LLM
+        if len(cmd) >= 2 and cmd.startswith("`") and cmd.endswith("`"):
+            cmd = cmd[1:-1].strip()
+        if cmd.startswith("$ ") and len(cmd) > 2:
+            cmd = cmd[2:].strip()
+        if not cmd or len(cmd) > 220:
+            return ""
+        # Reject unexpanded template placeholders and catastrophic destructive commands
+        if re.search(r"<[A-Za-z0-9_.-]{2,}>", cmd) or "YOUR_API_KEY" in cmd or "YOUR_TOKEN" in cmd:
+            return ""
+        if re.search(r"(?:^|\s|;|&)(?:rm\s+-[a-zA-Z]*[rf][a-zA-Z]*\s+/(\s|$)|:\(\)\s*\{|mkfs\.|dd\s+if=/dev/)", cmd):
+            return ""
+        return cmd
+
+    def _clean_and_rank_suggestions(
+        self,
+        raw_items: list[Any],
+        partial_input: str = "",
+        mode: str = "analyze",
+    ) -> list[dict[str, str]]:
+        cleaned: list[dict[str, str]] = []
+        seen: set[str] = set()
+        q = partial_input.strip().lower()
+
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            cmd = self._sanitize_command(str(item.get("cmd", "")))
+            if not cmd:
+                continue
+            key = " ".join(cmd.split())
+            if key in seen:
+                continue
+            if mode == "complete" and q and key.lower() == q:
+                continue
+            seen.add(key)
+            reason = " ".join(str(item.get("reason", "")).strip().splitlines()).strip()
+            cleaned.append({"cmd": cmd, "reason": (reason or "Project command")[:90]})
+
+        if mode == "complete" and q and cleaned:
+            def _comp_rank(entry: dict[str, str]) -> tuple[int, int]:
+                c = entry["cmd"].lower()
+                if c.startswith(q):
+                    return (0, len(c))
+                if q in c:
+                    return (1, len(c))
+                return (2, len(c))
+
+            # Keep original relative order inside each relevance tier
+            cleaned = [
+                item
+                for _, item in sorted(
+                    enumerate(cleaned),
+                    key=lambda pair: (_comp_rank(pair[1])[0], pair[0]),
+                )
+            ]
+        return cleaned[:12]
 
     def generate_suggestions(
         self,
@@ -415,7 +678,7 @@ class OpenRouterClient:
         """Request smart command suggestions from OpenRouter free models, switching models on limits."""
         api_key = str(self.config.get("openrouter_api_key", "")).strip()
         if not api_key:
-            raise AuthError("No OpenRouter API key configured. Run `cue onboard`.")
+            raise AuthError("No OpenRouter API key configured. Run `cue token` or `cue settings`.")
 
         candidates = self.get_candidate_models()
         messages = self._build_messages(
@@ -429,49 +692,81 @@ class OpenRouterClient:
         prev_model = state.get("active_model", "")
 
         errors: list[str] = []
-        max_attempts = min(len(candidates), 6)
+        max_attempts = min(len(candidates), 12)
+        per_req_timeout = max(4.0, min(float(timeout), 10.0))
+        deadline = time.monotonic() + max(per_req_timeout * 2.5, 16.0)
 
         for idx, model_id in enumerate(candidates[:max_attempts]):
             if not is_free_model(model_id):
                 continue
+            if idx > 0 and time.monotonic() >= deadline:
+                break
             t0 = time.monotonic()
             try:
-                resp = self._post_chat_completion(api_key, model_id, messages, timeout=timeout)
+                req_msgs = messages
+                try:
+                    resp = self._post_chat_completion(
+                        api_key, model_id, req_msgs, timeout=per_req_timeout
+                    )
+                except urllib.error.HTTPError as exc:
+                    err_body = ""
+                    try:
+                        err_body = exc.read().decode("utf-8", errors="replace")
+                    except OSError:
+                        pass
+                    if self._needs_system_role_fallback(exc.code, err_body):
+                        req_msgs = self._merge_system_into_user(messages)
+                        resp = self._post_chat_completion(
+                            api_key, model_id, req_msgs, timeout=per_req_timeout
+                        )
+                    else:
+                        raise urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(err_body.encode("utf-8"))) from exc
+
                 if isinstance(resp, dict) and "error" in resp:
                     err_obj = resp["error"]
                     err_code = err_obj.get("code") if isinstance(err_obj, dict) else None
                     err_msg = err_obj.get("message", str(err_obj)) if isinstance(err_obj, dict) else str(err_obj)
-                    is_auth, cd, reason = self._classify_failure(
-                        int(err_code) if isinstance(err_code, int) else None, err_msg
-                    )
-                    if is_auth:
-                        raise AuthError(reason)
-                    self.mark_model_cooldown(model_id, reason, cd)
-                    errors.append(f"{model_id}: {reason}")
-                    append_log(f"Switching from {model_id} ({reason})", "WARN", self.home)
-                    continue
+                    int_code = int(err_code) if isinstance(err_code, int) else None
+                    if self._needs_system_role_fallback(int_code, err_msg):
+                        req_msgs = self._merge_system_into_user(messages)
+                        resp = self._post_chat_completion(
+                            api_key, model_id, req_msgs, timeout=per_req_timeout
+                        )
+                    if isinstance(resp, dict) and "error" in resp:
+                        err_obj = resp["error"]
+                        err_code = err_obj.get("code") if isinstance(err_obj, dict) else None
+                        err_msg = err_obj.get("message", str(err_obj)) if isinstance(err_obj, dict) else str(err_obj)
+                        is_auth, cd, reason = self._classify_failure(
+                            int(err_code) if isinstance(err_code, int) else None, err_msg
+                        )
+                        if is_auth:
+                            raise AuthError(reason)
+                        self.mark_model_cooldown(model_id, reason, cd)
+                        errors.append(f"{model_id}: {reason}")
+                        append_log(f"Switching from {model_id} ({reason})", "WARN", self.home)
+                        continue
 
                 choices = resp.get("choices", []) if isinstance(resp, dict) else []
                 content = ""
                 if choices and isinstance(choices[0], dict):
                     msg = choices[0].get("message", {})
                     if isinstance(msg, dict):
-                        content = str(msg.get("content", ""))
+                        content = str(msg.get("content") or "")
+                        if not content.strip() and msg.get("reasoning"):
+                            content = str(msg.get("reasoning") or "")
 
                 parsed = _extract_json_object(content)
                 if not parsed or not isinstance(parsed.get("suggestions"), list):
                     self.mark_model_cooldown(model_id, "Malformed JSON response", 3 * 60)
                     errors.append(f"{model_id}: malformed JSON")
+                    append_log(f"Model {model_id} returned malformed JSON ({len(content)} chars).", "WARN", self.home)
                     continue
 
-                clean_suggestions: list[dict[str, str]] = []
-                for item in parsed["suggestions"]:
-                    if not isinstance(item, dict):
-                        continue
-                    cmd = str(item.get("cmd", "")).strip()
-                    reason = str(item.get("reason", "")).strip()
-                    if cmd and "\n" not in cmd and len(cmd) <= 220:
-                        clean_suggestions.append({"cmd": cmd, "reason": reason[:90]})
+                clean_suggestions = self._clean_and_rank_suggestions(
+                    parsed["suggestions"],
+                    partial_input=partial_input,
+                    mode=mode,
+                )
 
                 if not clean_suggestions:
                     self.mark_model_cooldown(model_id, "Empty suggestion list", 3 * 60)
@@ -482,6 +777,8 @@ class OpenRouterClient:
                 self.record_model_latency(model_id, elapsed_ms)
                 switched = bool(prev_model and prev_model != model_id)
                 state["active_model"] = model_id
+                state["last_ai_error"] = ""
+                state["last_ai_error_at"] = 0
                 state["total_ai_calls"] = int(state.get("total_ai_calls", 0)) + 1
                 if switched or idx > 0:
                     state["total_fallbacks"] = int(state.get("total_fallbacks", 0)) + 1
@@ -505,6 +802,9 @@ class OpenRouterClient:
                     pass
                 is_auth, cd, reason = self._classify_failure(exc.code, body)
                 if is_auth:
+                    state["last_ai_error"] = reason
+                    state["last_ai_error_at"] = int(time.time())
+                    save_state(state, self.home)
                     raise AuthError(reason) from exc
                 self.mark_model_cooldown(model_id, reason, cd)
                 errors.append(f"{model_id}: {reason}")
@@ -515,7 +815,11 @@ class OpenRouterClient:
                 errors.append(f"{model_id}: {reason}")
                 append_log(f"Model {model_id} error: {exc}; switching.", "WARN", self.home)
 
-        raise AllModelsExhaustedError("All tried free models failed: " + "; ".join(errors[-3:]))
+        final_msg = "All tried free models failed: " + "; ".join(errors[-3:])
+        state["last_ai_error"] = final_msg[:220]
+        state["last_ai_error_at"] = int(time.time())
+        save_state(state, self.home)
+        raise AllModelsExhaustedError(final_msg)
 
     def _build_messages(
         self,
@@ -531,21 +835,21 @@ class OpenRouterClient:
         ai_ctx = project_ctx.get("ai_context", {})
         recent_cmds = project_ctx.get("recent_commands", [])[-8:]
 
-        system_prompt = (
-            f"You are cue ({os_name}/{shell_name} CLI assistant). "
-            'Return ONLY JSON: {"suggestions":[{"cmd":"<cmd>","reason":"<3-7 words>"}],"summary":"<concise answer or note>"}. '
-            "Give up to 12 safe, runnable single-line commands (aim for 6-12 relevant options). "
-            "Use the detected package manager and recent commands. "
-            "If mode=='fix', suggest exact commands to diagnose or resolve the failed command. "
-            "If mode=='prompt', treat 'input' as a natural-language question or task: "
-            "if it asks a question, give a direct concise answer in 'summary', and give up to 12 exact safe shell commands in 'suggestions'."
-        )
-
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-
+        system_parts = [
+            f"You are cue ({os_name}/{shell_name} project-aware terminal assistant).",
+            'Return ONLY valid JSON without markdown: {"suggestions":[{"cmd":"<exact command>","reason":"<3-7 words>"}],"summary":"<concise project note or direct answer>"}.',
+            "Rules:",
+            "1. Suggest 6-12 safe, single-line, immediately runnable commands grounded strictly in the provided project context (stacks, package_manager, scripts, files/tree, git state, and recent commands).",
+            "2. Use the project's exact package manager (e.g. pnpm vs npm, uv vs pip), real detected scripts/targets, and real paths from 'tree' or 'git.changed'. Never invent non-existent scripts, targets, or placeholder arguments like <file>.",
+            "3. When mode=='complete' and 'input' is given, prioritize valid completions, flags, subcommands, and next-step workflows matching 'input' for this project.",
+            "4. When mode=='fix', inspect 'input' and 'error' and suggest exact safe commands tailored to this project's stack/pm to diagnose or fix the failure.",
+            "5. When mode=='prompt', treat 'input' as a natural-language question or task: provide a direct concise answer in 'summary', plus up to 12 exact safe commands for this repository in 'suggestions'.",
+        ]
         summary = str(ai_ctx.get("summary", "")).strip()
         if summary:
-            messages.append({"role": "system", "content": f"Context: {summary[:260]}"})
+            system_parts.append(f"Session context: {summary[:260]}")
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": "\n".join(system_parts)}]
 
         for turn in ai_ctx.get("turns", [])[-2:]:
             role = turn.get("role", "user")
@@ -553,20 +857,31 @@ class OpenRouterClient:
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content[:300]})
 
+        git_data = analysis.get("git", {}) if isinstance(analysis.get("git"), dict) else {}
+        compact_scripts = []
+        for s in analysis.get("scripts", [])[:12]:
+            if isinstance(s, dict) and s.get("cmd"):
+                desc = str(s.get("desc", "")).strip()
+                compact_scripts.append(f"{s['cmd']} ({desc[:36]})" if desc else str(s["cmd"]))
+
         compact_project: dict[str, Any] = {
             "project": project_ctx.get("name", ""),
             "cwd": cwd or project_ctx.get("project_path", ""),
             "stacks": analysis.get("stacks", []),
             "pm": analysis.get("package_manager", ""),
-            "scripts": [s.get("cmd") for s in analysis.get("scripts", [])[:8]],
-            "git_branch": analysis.get("git", {}).get("branch", ""),
-            "git_dirty": analysis.get("git", {}).get("dirty", False),
+            "scripts": compact_scripts,
+            "tree": analysis.get("tree", [])[:28],
+            "git": {
+                "is_repo": bool(git_data.get("is_repo")),
+                "branch": git_data.get("branch", ""),
+                "dirty": bool(git_data.get("dirty", False)),
+                "changed": git_data.get("status", [])[:6],
+                "commits": git_data.get("recent_commits", [])[:2],
+            },
             "recent": [{"c": c.get("cmd"), "e": c.get("exit_code", 0)} for c in recent_cmds],
             "mode": mode,
         }
         if mode == "prompt":
-            from . import __version__
-
             compact_project["cue_version"] = __version__
         if partial_input:
             compact_project["input"] = partial_input

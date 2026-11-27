@@ -34,26 +34,37 @@ IGNORE_DIRS = {
 
 MANIFEST_FILES = (
     "package.json",
+    "tsconfig.json",
+    "pnpm-workspace.yaml",
     "pnpm-lock.yaml",
     "yarn.lock",
     "package-lock.json",
     "bun.lock",
     "bun.lockb",
+    "deno.json",
+    "deno.jsonc",
     "pyproject.toml",
     "requirements.txt",
     "setup.py",
+    "setup.cfg",
     "Pipfile",
     "uv.lock",
     "poetry.lock",
+    "manage.py",
+    "environment.yml",
     "Cargo.toml",
     "go.mod",
+    "go.work",
     "Gemfile",
     "composer.json",
     "pom.xml",
     "build.gradle",
     "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
     "Makefile",
     "justfile",
+    "Taskfile.yml",
     "Dockerfile",
     "docker-compose.yml",
     "docker-compose.yaml",
@@ -61,7 +72,83 @@ MANIFEST_FILES = (
     "compose.yaml",
     "mix.exs",
     "flake.nix",
+    "CMakeLists.txt",
+    "meson.build",
+    "pubspec.yaml",
+    "Package.swift",
+    "Podfile",
+    "Chart.yaml",
+    "vercel.json",
+    "netlify.toml",
+    "wrangler.toml",
+    "Procfile",
+    ".pre-commit-config.yaml",
 )
+
+PROJECT_GLOB_MARKERS = (
+    "*.plugin.zsh",
+    "*.tf",
+    "*.csproj",
+    "*.sln",
+    "*.xcodeproj",
+    "*.xcworkspace",
+    "next.config.*",
+    "vite.config.*",
+    "astro.config.*",
+    "svelte.config.*",
+    "nuxt.config.*",
+)
+
+
+def is_project_directory(directory: str | Path) -> bool:
+    """Return True if directory (or an ancestor git repo) looks like a software/infra project."""
+    try:
+        path = Path(directory).expanduser().resolve()
+    except OSError:
+        return False
+    if path.is_file():
+        path = path.parent
+    if not path.is_dir():
+        return False
+
+    home = Path.home().resolve()
+    # Never classify the filesystem root or $HOME itself as a project workspace
+    if path == path.parent or path == home:
+        return False
+
+    # Walk up until $HOME or / to detect git/hg/svn repo membership
+    cur = path
+    while True:
+        if any((cur / vcs).exists() for vcs in (".git", ".hg", ".svn")):
+            if cur != home and cur != cur.parent:
+                return True
+        if cur == cur.parent or cur == home:
+            break
+        cur = cur.parent
+
+    if any((path / fname).exists() for fname in MANIFEST_FILES):
+        return True
+
+    for pattern in PROJECT_GLOB_MARKERS:
+        if any(path.glob(pattern)):
+            return True
+
+    if (path / ".github" / "workflows").is_dir():
+        return True
+
+    # Multiple code files inside a structured code dir (src/ or tests/) counts as a project
+    has_code_dir = (path / "src").is_dir() or (path / "tests").is_dir()
+    code_exts = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".rb", ".php", ".java", ".kt", ".swift", ".c", ".cpp", ".zsh"}
+    code_count = 0
+    try:
+        for child in path.iterdir():
+            if child.is_file() and child.suffix.lower() in code_exts:
+                code_count += 1
+                if code_count >= 2 or has_code_dir:
+                    return True
+    except OSError:
+        pass
+    return False
 
 
 def _run_git(cwd: Path, args: list[str], timeout: float = 1.5) -> str:
@@ -154,11 +241,10 @@ def _detect_node(root: Path, stacks: list[str], scripts: list[dict[str, str]]) -
 
 
 def _detect_python(root: Path, stacks: list[str], scripts: list[dict[str, str]]) -> str:
-    has_py = any(
-        (root / f).exists()
-        for f in ("pyproject.toml", "requirements.txt", "setup.py", "Pipfile", "manage.py")
-    )
-    if not has_py and not any(root.glob("*.py")):
+    manifest_files = ("pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile", "manage.py", "uv.lock", "poetry.lock", "environment.yml")
+    has_manifest = any((root / f).exists() for f in manifest_files)
+    py_files = list(root.glob("*.py"))
+    if not has_manifest and len(py_files) < 2 and not ((root / "tests").is_dir() and (py_files or any((root / "tests").glob("test_*.py")))):
         return ""
 
     stacks.append("Python")
@@ -183,6 +269,7 @@ def _detect_python(root: Path, stacks: list[str], scripts: list[dict[str, str]])
         ("fastapi", "FastAPI"),
         ("django", "Django"),
         ("flask", "Flask"),
+        ("streamlit", "Streamlit"),
         ("pytest", "pytest"),
         ("ruff", "Ruff"),
         ("mypy", "mypy"),
@@ -192,13 +279,33 @@ def _detect_python(root: Path, stacks: list[str], scripts: list[dict[str, str]])
         if pkg in lower and label not in stacks:
             stacks.append(label)
 
+    # Extract CLI script entrypoints from pyproject.toml if defined
+    script_sec = re.search(r"\[project\.scripts\]\s*(.*?)(?:\n\[|\Z)", py_text, flags=re.DOTALL)
+    if script_sec:
+        for line in script_sec.group(1).splitlines():
+            m = re.match(r"^\s*([A-Za-z0-9_.-]+)\s*=", line)
+            if m:
+                ep = m.group(1)
+                prefix = "uv run " if pm == "uv" else ("poetry run " if pm == "poetry" else "")
+                scripts.append({"cmd": f"{prefix}{ep}", "desc": f"pyproject script '{ep}'"})
+
     if (root / "manage.py").exists():
         scripts.append({"cmd": "python3 manage.py runserver", "desc": "Django dev server"})
         scripts.append({"cmd": "python3 manage.py test", "desc": "Run Django tests"})
 
-    if "pytest" in lower or (root / "tests").is_dir():
+    uses_pytest = "pytest" in lower or (root / "pytest.ini").exists() or (root / "conftest.py").exists() or ((root / "tests").is_dir() and any((root / "tests").glob("**/conftest.py")))
+    if uses_pytest:
         runner = "uv run pytest" if pm == "uv" else ("poetry run pytest" if pm == "poetry" else "pytest")
         scripts.append({"cmd": runner, "desc": "Run Python test suite"})
+    elif (root / "tests").is_dir() and any((root / "tests").glob("test_*.py")):
+        scripts.append({"cmd": "python3 -m unittest discover -s tests -v", "desc": "Run Python unittest suite"})
+
+    if "fastapi" in lower or "uvicorn" in lower:
+        prefix = "uv run " if pm == "uv" else ("poetry run " if pm == "poetry" else "")
+        if (root / "main.py").exists():
+            scripts.append({"cmd": f"{prefix}uvicorn main:app --reload", "desc": "Start FastAPI dev server"})
+        elif (root / "app" / "main.py").exists():
+            scripts.append({"cmd": f"{prefix}uvicorn app.main:app --reload", "desc": "Start FastAPI dev server"})
 
     if "ruff" in lower:
         prefix = "uv run " if pm == "uv" else ("poetry run " if pm == "poetry" else "")
@@ -209,18 +316,30 @@ def _detect_python(root: Path, stacks: list[str], scripts: list[dict[str, str]])
 
 def _detect_makefile(root: Path, scripts: list[dict[str, str]]) -> None:
     makefile = root / "Makefile"
-    if not makefile.exists():
-        return
-    text = _read_text_limited(makefile, 32768)
-    targets = re.findall(r"^([a-zA-Z0-9][a-zA-Z0-9_.-]*)\s*:", text, flags=re.MULTILINE)
-    seen = set()
-    for t in targets:
-        if t.startswith(".") or t in seen:
-            continue
-        seen.add(t)
-        scripts.append({"cmd": f"make {t}", "desc": f"Makefile target '{t}'"})
-        if len(seen) >= 10:
-            break
+    if makefile.exists():
+        text = _read_text_limited(makefile, 32768)
+        targets = re.findall(r"^([a-zA-Z0-9][a-zA-Z0-9_.-]*)\s*:", text, flags=re.MULTILINE)
+        seen = set()
+        for t in targets:
+            if t.startswith(".") or t in seen:
+                continue
+            seen.add(t)
+            scripts.append({"cmd": f"make {t}", "desc": f"Makefile target '{t}'"})
+            if len(seen) >= 10:
+                break
+
+    justfile = root / "justfile"
+    if justfile.exists():
+        text = _read_text_limited(justfile, 32768)
+        targets = re.findall(r"^([a-zA-Z0-9][a-zA-Z0-9_.-]*)\s*(?:\([^)]*\))?\s*:", text, flags=re.MULTILINE)
+        seen = set()
+        for t in targets:
+            if t.startswith("_") or t in seen:
+                continue
+            seen.add(t)
+            scripts.append({"cmd": f"just {t}", "desc": f"just recipe '{t}'"})
+            if len(seen) >= 8:
+                break
 
 
 def _detect_other_stacks(root: Path, stacks: list[str], scripts: list[dict[str, str]]) -> None:
@@ -243,6 +362,18 @@ def _detect_other_stacks(root: Path, stacks: list[str], scripts: list[dict[str, 
                 {"cmd": "go build ./...", "desc": "Build Go packages"},
             ]
         )
+
+    if (root / "pubspec.yaml").exists():
+        stacks.append("Flutter/Dart")
+        scripts.append({"cmd": "flutter test", "desc": "Run Flutter/Dart tests"})
+
+    if (root / "Package.swift").exists():
+        stacks.append("Swift")
+        scripts.append({"cmd": "swift test", "desc": "Run Swift package tests"})
+
+    if any(root.glob("*.csproj")) or any(root.glob("*.sln")):
+        stacks.append(".NET")
+        scripts.append({"cmd": "dotnet test", "desc": "Run .NET tests"})
 
     if (root / "Gemfile").exists():
         stacks.append("Ruby")
@@ -274,6 +405,9 @@ def _detect_other_stacks(root: Path, stacks: list[str], scripts: list[dict[str, 
 
     if any(root.glob("*.plugin.zsh")):
         stacks.append("Zsh Plugin")
+        if (root / "tests").is_dir():
+            for zt in sorted((root / "tests").glob("*.zsh"))[:3]:
+                scripts.append({"cmd": f"zsh tests/{zt.name}", "desc": f"Run Zsh test {zt.name}"})
 
     if any(root.glob("*.tf")):
         stacks.append("Terraform")
@@ -283,11 +417,26 @@ def _detect_other_stacks(root: Path, stacks: list[str], scripts: list[dict[str, 
         stacks.append("Docker")
 
     for compose_name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
-        if (root / compose_name).exists():
+        cpath = root / compose_name
+        if cpath.exists():
             if "Docker Compose" not in stacks:
                 stacks.append("Docker Compose")
             scripts.append({"cmd": "docker compose up -d", "desc": "Start compose services"})
             scripts.append({"cmd": "docker compose logs -f", "desc": "Follow compose logs"})
+            # Extract compose service names so AI & dropdown know exact service targets
+            ctext = _read_text_limited(cpath, 16384)
+            in_services = False
+            for line in ctext.splitlines():
+                if re.match(r"^services:\s*$", line):
+                    in_services = True
+                    continue
+                if in_services:
+                    if re.match(r"^[a-zA-Z0-9_-]+:", line):
+                        break
+                    svc_m = re.match(r"^  ([a-zA-Z0-9_.-]+):\s*$", line)
+                    if svc_m:
+                        svc = svc_m.group(1)
+                        scripts.append({"cmd": f"docker compose logs -f {svc}", "desc": f"Logs for service '{svc}'"})
             break
 
     _detect_makefile(root, scripts)
@@ -397,9 +546,11 @@ def analyze_project(directory: str | Path) -> dict[str, Any]:
             dedup_scripts.append(item)
 
     tree = _scan_tree(root)
+    is_proj = bool(git_info.get("is_repo") or is_project_directory(root))
     return {
         "root": str(root),
         "name": root.name or str(root),
+        "is_project": is_proj,
         "stacks": stacks,
         "package_manager": package_manager,
         "scripts": dedup_scripts[:20],

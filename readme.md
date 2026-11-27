@@ -18,9 +18,12 @@
     - `⚙ Script`: Auto-detected runnable scripts and targets (`package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, `docker-compose.yml`, etc.)
     - `⌘ Hist`: Global shell history
   - Pure Zsh in-memory + TSV cache lookups keep keystrokes instantaneous; AI calls run asynchronously via a FIFO + `zle -F` file descriptor.
-- **Automatic Folder Resume & Silent Background Analysis**
-  - On terminal startup or `cd`, `cue` checks `~/.cue/projects/` first to resume any existing project context immediately, or creates one automatically.
-  - Project analysis runs silently in the background without prompting for permission.
+- **Automatic Folder Resume & Project-Only Tracking**
+  - On terminal startup or `cd`, `cue` inspects the folder and only creates a context entry inside `~/.cue/projects/` if the folder is an actual software/infra project (git repo, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Makefile`, `Dockerfile`, etc.). Non-project folders like `$HOME` or `~/Downloads` are skipped cleanly.
+  - Project analysis detects frameworks, scripts, Compose services, git changes, and file layout silently in the background without prompting for permission.
+- **Optional Project-Aware AI Suggestions (Recents & History by Default)**
+  - Works out of the box with **zero API key required** using your project **Recents**, **Scripts**, **Shell History**, and instant offline **Error Diagnosis & Retry**.
+  - Want project-tailored AI predictions? Enable **AI Suggestions** anytime inside `cue settings` (or `cue settings --ai on`), paste your free [OpenRouter](https://openrouter.ai/keys) API key, and `cue` will generate contextual commands grounded in your repository tree, package manager, scripts, and git status.
 - **Automatic Error Diagnosis, Dimmed Fix Ghost & Auto-Retry**
   - When a command fails (non-zero exit code, excluding `Ctrl+C`), `cue` diagnoses common issues locally in milliseconds (e.g., `No module named pytest`, missing binaries, `chmod +x`, git/npm/docker failures) and shows the fix command immediately as **dimmed inline ghost text** right on your prompt.
   - Press **`Tab`** to accept the fix command (or just start typing to write your own command), press `↓` to see alternate fixes, and once your fix succeeds, `cue` automatically suggests your original failed command next in dimmed text so you can re-run it with `Tab` + `Enter`.
@@ -170,13 +173,13 @@ source ~/.local/share/cue/bash/cue.bash
 
 ---
 
-## First-Session Onboarding & Changing Token
+## First-Session Onboarding & Enabling Optional AI
 
-When you open your first interactive Zsh session with `cue` loaded (and `~/.cue/config.json` does not exist yet), the setup wizard starts automatically:
+When you open your first interactive Zsh session with `cue` loaded (and `~/.cue/config.json` does not exist yet), lightweight onboarding initializes `~/.cue/config.json` automatically with **no API key required**:
 
-1. Prompts for your OpenRouter API key (get a free key at `https://openrouter.ai/keys`, or press `Enter` to skip and use local project history/scripts mode).
-2. Verifies the key against OpenRouter, fetches available `:free` models, and selects a default free model.
-3. Saves configuration to `~/.cue/config.json` with `0600` permissions and analyzes your current directory.
+1. Local autocomplete (`Recents`, `Scripts`, `Shell history`, and instant `Error Fix & Retry`) is active immediately.
+2. Current folder is analyzed and added to `~/.cue/projects/` only if it is detected as a project.
+3. **AI Suggestions are optional and disabled by default.** To turn them on anytime, run `cue settings`, toggle **AI Suggestions** to Enabled, and enter a free OpenRouter API key from `https://openrouter.ai/keys` (or run `cue settings --ai on` and `cue token`).
 
 You can re-run onboarding anytime with `cue onboard --force`, change your OpenRouter token anytime with `cue token` (or `cue token <new-key>`), or supply a key via `OPENROUTER_API_KEY` in your environment.
 
@@ -202,8 +205,8 @@ You can re-run onboarding anytime with `cue onboard --force`, change your OpenRo
 ### Core Commands
 
 ```zsh
-cue status                         # API status, prompt mode, active :free model, and storage usage
-cue settings                       # Interactive TUI: Prompt Mode, Models, Token, Remove Projects, Uninstall
+cue status                         # AI toggle status, API status, active :free model, & storage usage
+cue settings [--ai on|off]         # Interactive TUI: AI Suggestions, Models, Token, Projects, Uninstall
 cue ask "<prompt>"                 # Translate free-text prompt to runnable commands (alias: `cue prompt`)
 cue history [--limit N]            # Modern TUI table of recent commands in the current project
 cue onboard [--force]              # Run (or re-run) the interactive setup wizard
@@ -256,16 +259,16 @@ Settings live in `~/.cue/config.json`:
 | Key | Default | Description |
 | --- | --- | --- |
 | `openrouter_api_key` | `""` | OpenRouter API key (fallback to `$OPENROUTER_API_KEY` if unset) |
-| `preferred_model` | `"qwen/qwen3-coder:free"` | Preferred `:free` model ID |
+| `ai_suggestions_enabled` | `false` | Optional AI suggestions in autocomplete (`cue settings` to enable) |
+| `preferred_model` | `"openrouter/free"` | Preferred `:free` model ID |
 | `free_models_only` | `true` | Always enforced to `true` |
-| `prompt_mode` | `false` | Enable free-text natural-language prompts directly on the terminal (`cue settings` to toggle) |
-| `auto_analyze` | `true` | Automatically analyze folders on entry |
-| `ai_debounce_ms` | `450` | Debounce delay for live typing AI queries |
+| `auto_analyze` | `true` | Automatically analyze detected projects on entry |
+| `ai_debounce_ms` | `350` | Debounce delay for live typing AI queries |
 | `max_project_bytes` | `262144` (256 KB) | Maximum size per project JSON file before compaction |
 | `max_total_bytes` | `20971520` (20 MB) | Total projects storage cap before LRU eviction |
 | `max_log_bytes` | `524288` (512 KB) | Log file rotation threshold |
 | `legacy_retention_days` | `30` | Default threshold for interactive `old` cleanup |
-| `max_dropdown_items` | `7` | Visible rows in the ZLE dropdown viewport |
+| `max_dropdown_items` | `8` | Maximum dropdown item count reference |
 
 Supported environment variables:
 

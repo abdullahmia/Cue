@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import ensure_cue_dirs
+from .config import ensure_cue_dirs, load_config
 
 
 def _human_age(ts: int, now: int | None = None) -> str:
@@ -55,8 +55,9 @@ def build_ranked_suggestions(
     global_history: list[str] | None = None,
     limit: int = 25,
     apply_caps: bool = True,
+    ai_enabled: bool = True,
 ) -> list[dict[str, str]]:
-    """Merge and rank suggestions: active fixes/retry, then Recent (max 3), AI (max 12), then Others."""
+    """Merge and rank suggestions: active fixes/retry, then Recent (max 3), AI (max 12 when enabled), then Others."""
     now = int(time.time())
     query = partial_input.strip()
     candidates: dict[str, dict[str, Any]] = {}
@@ -116,13 +117,14 @@ def build_ranked_suggestions(
         score = 190.0 + recency_rank * 40.0 + freq_bonus
         _upsert(cmd, "proj", reason, score)
 
-    # 2. Cached / fresh AI suggestions (shown after recent project commands)
-    ai_suggestions = project_ctx.get("cached_suggestions", [])
-    for idx, item in enumerate(ai_suggestions):
-        cmd = str(item.get("cmd", ""))
-        reason = str(item.get("reason", "AI suggestion"))
-        score = 120.0 - idx * 4.0
-        _upsert(cmd, "ai", reason, score)
+    # 2. Cached / fresh AI suggestions (only when AI suggestions are enabled)
+    if ai_enabled:
+        ai_suggestions = project_ctx.get("cached_suggestions", [])
+        for idx, item in enumerate(ai_suggestions):
+            cmd = str(item.get("cmd", ""))
+            reason = str(item.get("reason", "AI suggestion"))
+            score = 120.0 - idx * 4.0
+            _upsert(cmd, "ai", reason, score)
 
     # 3. Detected project scripts/targets
     scripts = project_ctx.get("analysis", {}).get("scripts", [])
@@ -160,12 +162,29 @@ def write_zsh_suggestion_cache(
     project_ctx: dict[str, Any],
     home: Path | None = None,
     limit: int = 60,
+    ai_enabled: bool | None = None,
 ) -> Path:
-    """Write a fast TSV cache (~/.cue/cache/proj_<id>.tsv) for zero-latency ZLE rendering."""
+    """Write a fast TSV cache (~/.cue/cache/proj_<id>.tsv) preserving per-source headroom for ZLE."""
     paths = ensure_cue_dirs(home)
+    if ai_enabled is None:
+        ai_enabled = bool(load_config(paths["root"]).get("ai_suggestions_enabled", False))
+
     pid = project_ctx.get("project_id", "default")
     cache_file = paths["cache"] / f"proj_{pid}.tsv"
-    ranked = build_ranked_suggestions(project_ctx, partial_input="", limit=limit, apply_caps=False)
+    ranked_all = build_ranked_suggestions(
+        project_ctx,
+        partial_input="",
+        limit=120,
+        apply_caps=False,
+        ai_enabled=bool(ai_enabled),
+    )
+
+    # Guarantee each source has dedicated slots so many recent_commands never crowd out AI or scripts
+    fixes = [r for r in ranked_all if r["source"] in ("fix", "retry")][:10]
+    recents = [r for r in ranked_all if r["source"] == "proj"][:20]
+    ais = [r for r in ranked_all if r["source"] == "ai"][:16] if ai_enabled else []
+    scripts = [r for r in ranked_all if r["source"] == "script"][:20]
+    ranked = (fixes + recents + ais + scripts)[:limit]
 
     lines: list[str] = []
     for item in ranked:

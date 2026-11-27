@@ -29,7 +29,7 @@ from .context_manager import ContextManager, make_project_id, resolve_project_ro
 from .daemon import ensure_daemon_running, get_daemon_meta_path, request_daemon, run_daemon_server
 from .error_fixer import diagnose_command_failure
 from .openrouter_client import AllModelsExhaustedError, AuthError, OpenRouterClient, is_free_model
-from .project_analyzer import analyze_project, compute_fingerprint
+from .project_analyzer import analyze_project, compute_fingerprint, is_project_directory, is_project_directory
 from .suggester import build_ranked_suggestions, write_zsh_suggestion_cache
 from .tui import (
     Theme,
@@ -47,87 +47,87 @@ from .tui import (
 )
 
 
+def _refresh_all_suggestion_caches(cfg: dict[str, Any]) -> None:
+    """Rebuild stored project TSV caches so toggles take effect immediately in ZLE."""
+    cm = ContextManager(config=cfg)
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+    for pfile in cm.paths["projects"].glob("*.json"):
+        if pfile.name == "index.json":
+            continue
+        try:
+            data = json.loads(pfile.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and data.get("project_id"):
+            write_zsh_suggestion_cache(data, home=cm.home, ai_enabled=ai_enabled)
+
+
+def _apply_validated_key(cfg: dict[str, Any], new_key: str) -> tuple[bool, str, int]:
+    """Validate and persist OpenRouter API key, auto-selecting an available :free model."""
+    client = OpenRouterClient(config=cfg)
+    ok, msg, models = client.validate_key(new_key)
+    cfg["openrouter_api_key"] = new_key
+    cfg["onboarded"] = True
+    save_config(cfg)
+    if ok:
+        client.clear_model_health()
+        available = {m["id"] for m in models}
+        if cfg.get("preferred_model") not in available and models:
+            chosen = next((m for m in DEFAULT_FREE_MODELS if m in available), models[0]["id"])
+            cfg["preferred_model"] = chosen
+            save_config(cfg)
+            st = load_state()
+            st["active_model"] = chosen
+            save_state(st)
+    request_daemon("/reload-config", {}, timeout=1.5)
+    return ok, msg, len(models)
+
+
 def cmd_onboard(args: argparse.Namespace) -> int:
-    """Interactive first-session onboarding flow."""
+    """Interactive first-session onboarding flow (no API key required upfront)."""
     theme = Theme()
     cfg = load_config()
     ensure_cue_dirs()
-    print_banner(theme, "First-session setup wizard")
+    print_banner(theme, "First-session setup")
 
-    existing_key = cfg.get("openrouter_api_key", "")
-    if existing_key and not args.force:
-        print(f"\n  {theme.green('✓')} OpenRouter API key is already configured.")
-        if not prompt_yes_no(theme, "Reconfigure OpenRouter API key?", default=False):
-            cfg["onboarded"] = True
-            cfg["onboarded_at"] = int(time.time())
-            save_config(cfg)
-            return 0
-
-    api_key = prompt_api_key(theme)
-    client = OpenRouterClient(config=cfg)
-
-    if api_key:
-        print(f"\n  {theme.cyan('◌')} Verifying OpenRouter key & discovering :free models...")
-        ok, msg, models = client.validate_key(api_key)
-        if ok:
-            print(f"  {theme.green('✓')} {msg}")
-            cfg["openrouter_api_key"] = api_key
-            # Pick best available default free model
-            available = {m["id"] for m in models}
-            chosen = next((m for m in DEFAULT_FREE_MODELS if m in available), models[0]["id"])
-            cfg["preferred_model"] = chosen
-            state = load_state()
-            state["active_model"] = chosen
-            save_state(state)
-            print(f"  {theme.green('✓')} Active free model: {theme.bold(theme.cyan(chosen))}")
-        else:
-            print(f"  {theme.red('✗')} {msg}")
-            if prompt_yes_no(theme, "Save key anyway (or retry later with `cue onboard`)?", default=False):
-                cfg["openrouter_api_key"] = api_key
-    else:
-        print(f"\n  {theme.yellow('!')} Skipped API key. Local history, scripts & error-fix autocomplete enabled.")
-        print(theme.dim("    Run `cue token` anytime to add or change your OpenRouter API key."))
-
-    # Always auto-analyze in the background without asking permission
     cfg["auto_analyze"] = True
     cfg["free_models_only"] = True
+    cfg["ai_suggestions_enabled"] = bool(cfg.get("ai_suggestions_enabled", False))
     cfg["onboarded"] = True
     cfg["onboarded_at"] = int(time.time())
     save_config(cfg)
 
-    # Check if current folder already exists in ~/.cue/projects or initialize it
     cwd = os.getcwd()
-    cm = ContextManager(config=cfg)
     root = resolve_project_root(cwd)
-    pfile = cm.project_file(make_project_id(root))
-    existed = pfile.exists()
-    ctx = cm.load_project(cwd)
-    if not existed or not ctx.get("analysis"):
-        ctx["analysis"] = analyze_project(cwd)
-        ctx["fingerprint"] = ctx["analysis"].get("fingerprint", "")
-        ctx["last_analyzed"] = int(time.time())
-    if cfg.get("openrouter_api_key") and not ctx.get("cached_suggestions"):
-        try:
-            print(f"  {theme.cyan('◌')} Preparing context for {Path(cwd).name}...")
-            res = OpenRouterClient(config=cfg).generate_suggestions(ctx, cwd=cwd, mode="analyze", timeout=8.0)
-            ctx["cached_suggestions"] = res["suggestions"]
-            cm.append_ai_turn(ctx, f"Opened {cwd}", res.get("summary", ""), res["model"])
-            print(f"  {theme.green('✓')} Ready with {len(res['suggestions'])} AI suggestions!")
-        except (AuthError, AllModelsExhaustedError) as exc:
-            print(f"  {theme.yellow('!')} AI warmup skipped: {exc}")
-    cm.save_project(ctx)
-    write_zsh_suggestion_cache(ctx)
+    cm = ContextManager(config=cfg)
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+    is_proj = is_project_directory(root)
+    existed = cm.has_project(cwd)
+
+    if is_proj or existed:
+        ctx = cm.load_project(cwd)
+        if not existed or not ctx.get("analysis"):
+            ctx["analysis"] = analyze_project(root)
+            ctx["fingerprint"] = ctx["analysis"].get("fingerprint", "")
+            ctx["last_analyzed"] = int(time.time())
+        cm.save_project(ctx)
+        write_zsh_suggestion_cache(ctx, ai_enabled=ai_enabled)
+        stacks = ", ".join(ctx.get("analysis", {}).get("stacks", [])) or "Project"
+        print(f"\n  {theme.green('✓')} Detected project {theme.bold(root.name)} ({theme.cyan(stacks)})")
+    else:
+        print(f"\n  {theme.slate('○')} Current folder ({root.name or str(root)}) is not a project (recents & shell history ready)")
+
     ensure_daemon_running()
 
     print("")
-    print(theme.green("  ✓ Setup complete!"))
-    print(theme.dim("  Tips: Press ↓/↑ for dropdown · Tab/→ to fill · Enter to run · Ctrl+Space for AI refresh"))
-    print(theme.dim("        Change token anytime with `cue token` · Manage contexts with `cue context list`.\n"))
+    print(f"  {theme.green('✓')} {theme.bold('cue is ready!')} Recents, scripts, error-fix & shell history autocomplete enabled.")
+    print(theme.dim("  Optional AI: Run `cue settings` anytime to enable AI Suggestions & add your OpenRouter :free key."))
+    print(theme.dim("  Keys: Press ↓ (smart) or ↑ (history) for dropdown · Tab/→ to fill · Enter to run\n"))
     return 0
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
-    """Find existing project context in ~/.cue (or create one), analyze in background, and update cache."""
+    """Find existing project context in ~/.cue (or create one if folder is a project) and update cache."""
     directory = Path(args.dir or os.getcwd()).expanduser().resolve()
     if not directory.exists():
         return 1
@@ -137,27 +137,52 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         daemon_res = request_daemon(
             "/analyze",
             {"dir": str(directory), "force": bool(args.force), "no_ai": bool(args.no_ai)},
-            timeout=9.0,
+            timeout=14.0,
         )
         if isinstance(daemon_res, dict) and "project_id" in daemon_res:
             if args.json:
                 print(json.dumps(daemon_res, ensure_ascii=False))
             elif not args.quiet:
                 theme = Theme()
-                stacks = ", ".join(daemon_res.get("analysis", {}).get("stacks", []))
-                print(f"{theme.green('✓')} Ready {theme.bold(directory.name)} ({theme.cyan(stacks)})")
+                if daemon_res.get("skipped"):
+                    print(f"{theme.dim('○')} Skipped {directory.name} (not a project)")
+                else:
+                    stacks = ", ".join(daemon_res.get("analysis", {}).get("stacks", []))
+                    print(f"{theme.green('✓')} Ready {theme.bold(directory.name)} ({theme.cyan(stacks)})")
             return 0
 
     cfg = load_config()
     cm = ContextManager(config=cfg)
     root = resolve_project_root(directory)
-    pfile = cm.project_file(make_project_id(root))
-    already_exists = pfile.exists()
+    already_exists = cm.has_project(root)
+    is_proj = is_project_directory(root)
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+    has_key = bool(cfg.get("openrouter_api_key"))
+
+    if not args.force and not already_exists and not is_proj:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "project_id": "",
+                        "is_project": False,
+                        "skipped": True,
+                        "cache_file": "",
+                        "analysis": {"root": str(root), "name": root.name, "is_project": False, "stacks": []},
+                        "suggestions": [],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        elif not args.quiet:
+            print(f"{Theme().dim('○')} Skipped {directory.name} (not a project)")
+        return 0
+
     ctx = cm.load_project(directory)
     fp = compute_fingerprint(root)
     now = int(time.time())
 
-    # If existing context exists in ~/.cue, continue using it unless forced or fingerprint/TTL stale
+    # Continue using existing context unless forced or fingerprint/TTL stale
     if not already_exists or args.force or fp != ctx.get("fingerprint") or not ctx.get("analysis"):
         ctx["analysis"] = analyze_project(root)
         ctx["fingerprint"] = fp
@@ -170,7 +195,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         or (now - int(ctx.get("last_analyzed", 0)) > 1800)
     )
 
-    if needs_ai and not args.no_ai and cfg.get("openrouter_api_key"):
+    if needs_ai and not args.no_ai and ai_enabled and has_key:
         try:
             client = OpenRouterClient(config=cfg)
             res = client.generate_suggestions(ctx, cwd=str(directory), mode="analyze", timeout=8.5)
@@ -182,17 +207,19 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             append_log(f"Analyze AI skipped for {root}: {exc}", "WARN")
 
     cm.save_project(ctx)
-    cache_path = write_zsh_suggestion_cache(ctx)
+    cache_path = write_zsh_suggestion_cache(ctx, ai_enabled=ai_enabled)
 
     if args.json:
         print(
             json.dumps(
                 {
                     "project_id": ctx["project_id"],
+                    "is_project": True,
+                    "skipped": False,
                     "existed": already_exists,
                     "cache_file": str(cache_path),
                     "analysis": ctx.get("analysis", {}),
-                    "suggestions": build_ranked_suggestions(ctx),
+                    "suggestions": build_ranked_suggestions(ctx, ai_enabled=ai_enabled),
                 },
                 ensure_ascii=False,
             )
@@ -219,8 +246,10 @@ def cmd_record(args: argparse.Namespace) -> int:
         return 0
 
     cfg = load_config()
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+    has_key = bool(cfg.get("openrouter_api_key"))
     cm = ContextManager(config=cfg)
-    ctx = cm.record_command(directory, args.command, exit_code=args.exit_code)
+    ctx = cm.record_command(directory, args.command, exit_code=args.exit_code, project_only=True)
     if ctx is not None:
         cmd_clean = args.command.strip()
         if int(args.exit_code) not in (0, 130):
@@ -234,7 +263,7 @@ def cmd_record(args: argparse.Namespace) -> int:
                     "fixes": diag["fixes"],
                     "ts": int(time.time()),
                 }
-                if cfg.get("openrouter_api_key") and not getattr(args, "no_ai", False):
+                if ai_enabled and has_key and not getattr(args, "no_ai", False):
                     try:
                         res = OpenRouterClient(config=cfg).generate_suggestions(
                             ctx,
@@ -262,14 +291,33 @@ def cmd_record(args: argparse.Namespace) -> int:
                 ctx["pending_retry"] = {}
             ctx["last_error"] = {}
         cm.save_project(ctx)
-        write_zsh_suggestion_cache(ctx)
+        write_zsh_suggestion_cache(ctx, ai_enabled=ai_enabled)
         if getattr(args, "json", False):
             print(json.dumps({"recorded": True, "last_error": ctx.get("last_error", {}), "pending_retry": ctx.get("pending_retry", {})}, ensure_ascii=False))
+    elif getattr(args, "json", False):
+        cmd_clean = args.command.strip()
+        fixes_only: list[dict[str, str]] = []
+        diag_text = ""
+        if int(args.exit_code) not in (0, 130) and cmd_clean and not cmd_clean.startswith("cue"):
+            diag = diagnose_command_failure(cmd_clean, args.exit_code, directory)
+            fixes_only = list(diag.get("fixes", []))
+            diag_text = str(diag.get("diagnosis", ""))
+        print(
+            json.dumps(
+                {
+                    "recorded": False,
+                    "skipped": True,
+                    "last_error": {"cmd": cmd_clean, "exit_code": int(args.exit_code), "diagnosis": diag_text, "fixes": fixes_only} if fixes_only else {},
+                    "fixes": fixes_only,
+                },
+                ensure_ascii=False,
+            )
+        )
     return 0
 
 
 def cmd_suggest(args: argparse.Namespace) -> int:
-    """Return ranked suggestions (optionally refreshing AI predictions for partial input or prompt mode)."""
+    """Return ranked suggestions (optionally refreshing AI predictions when enabled or in prompt mode)."""
     directory = Path(args.dir or os.getcwd()).expanduser().resolve()
     req_mode = getattr(args, "mode", "auto")
     if req_mode == "auto":
@@ -279,7 +327,7 @@ def cmd_suggest(args: argparse.Namespace) -> int:
         daemon_res = request_daemon(
             "/suggest",
             {"dir": str(directory), "input": args.input or "", "limit": args.limit, "live": True, "mode": req_mode},
-            timeout=8.5,
+            timeout=12.0,
         )
         if isinstance(daemon_res, dict) and "suggestions" in daemon_res:
             if args.tsv:
@@ -312,20 +360,25 @@ def cmd_suggest(args: argparse.Namespace) -> int:
                 return 0
 
     cfg = load_config()
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+    has_key = bool(cfg.get("openrouter_api_key"))
     cm = ContextManager(config=cfg)
+    root = resolve_project_root(directory)
+    is_tracked = cm.has_project(root) or is_project_directory(root)
     ctx = cm.load_project(directory)
 
     if not ctx.get("analysis"):
-        ctx["analysis"] = analyze_project(resolve_project_root(directory))
+        ctx["analysis"] = analyze_project(root)
         ctx["fingerprint"] = ctx["analysis"].get("fingerprint", "")
 
     prompt_suggestions: list[dict[str, str]] = []
     prompt_answer = ""
     prompt_model = ""
     prompt_error = ""
-    if args.live and not cfg.get("openrouter_api_key") and req_mode == "prompt":
-        prompt_error = "OpenRouter API key not configured (run: cue token)"
-    elif args.live and cfg.get("openrouter_api_key"):
+    can_call_ai = has_key and (req_mode == "prompt" or ai_enabled)
+    if args.live and req_mode == "prompt" and not has_key:
+        prompt_error = "OpenRouter API key not configured (enable AI in `cue settings` or run: cue token)"
+    elif args.live and can_call_ai:
         try:
             client = OpenRouterClient(config=cfg)
             res = client.generate_suggestions(
@@ -350,16 +403,17 @@ def cmd_suggest(args: argparse.Namespace) -> int:
                 f"Suggested: {', '.join(s['cmd'] for s in res['suggestions'][:3])}",
                 res["model"],
             )
-            cm.save_project(ctx)
+            if is_tracked:
+                cm.save_project(ctx)
         except (AuthError, AllModelsExhaustedError) as exc:
             prompt_error = str(exc)
             append_log(f"Live suggest error: {exc}", "WARN")
 
-    cache_path = write_zsh_suggestion_cache(ctx)
+    cache_path = write_zsh_suggestion_cache(ctx, ai_enabled=ai_enabled) if is_tracked else ""
     if req_mode == "prompt" and prompt_suggestions:
         ranked = [{"cmd": s["cmd"], "source": "ai", "reason": s["reason"]} for s in prompt_suggestions[: args.limit]]
     else:
-        ranked = build_ranked_suggestions(ctx, partial_input=args.input or "", limit=args.limit)
+        ranked = build_ranked_suggestions(ctx, partial_input=args.input or "", limit=args.limit, ai_enabled=ai_enabled)
 
     if args.tsv:
         if req_mode == "prompt":
@@ -535,24 +589,37 @@ def cmd_models(args: argparse.Namespace) -> int:
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
-    """Display cue plugin status, active free model, and ~/.cue storage."""
+    """Display cue plugin status, AI toggle, active free model, and ~/.cue storage."""
     theme = Theme()
     cfg = load_config()
     state = load_state()
     cm = ContextManager(config=cfg)
     stats = cm.get_storage_stats()
-    ctx = cm.load_project(os.getcwd())
+    cwd = os.getcwd()
+    root = resolve_project_root(cwd)
+    is_proj = is_project_directory(root) or cm.has_project(cwd)
+    ctx = cm.load_project(cwd) if is_proj else None
 
     print_banner(theme, f"v{__version__} · Status")
+    ai_on = bool(cfg.get("ai_suggestions_enabled", False))
+    ai_label = theme.green("enabled") if ai_on else theme.yellow("disabled (recents & history only; enable in `cue settings`)")
     key_ok = bool(cfg.get("openrouter_api_key"))
-    print(f"  API Key:         {theme.green('configured') if key_ok else theme.yellow('not set (`cue onboard`)')}")
+    print(f"  AI Suggestions:  {ai_label}")
+    print(f"  API Key:         {theme.green('configured') if key_ok else theme.dim('not set (optional; `cue settings` or `cue token`)')}")
     prompt_hint_cli = theme.cyan('cue ask "<prompt>"') + " " + theme.dim('/ cue prompt "<prompt>"')
     print(f"  Prompt CLI:      {prompt_hint_cli}")
     print(f"  Free-only mode:  {theme.green('enforced (:free models only)')}")
     print(f"  Active model:    {theme.cyan(state.get('active_model', DEFAULT_FREE_MODELS[0]))}")
     if state.get("total_fallbacks"):
         print(f"  Auto-switches:   {state['total_fallbacks']} (last: {state.get('last_switch_reason', '')})")
-    print(f"  Current project: {theme.bold(ctx['name'])} ({', '.join(ctx.get('analysis', {}).get('stacks', ['not analyzed']))})")
+    if ctx is not None:
+        proj_stacks = ", ".join(ctx.get("analysis", {}).get("stacks", ["not analyzed"]))
+        cached_ai = len(ctx.get("cached_suggestions", []))
+        print(f"  Current project: {theme.bold(ctx['name'])} ({proj_stacks}) · {cached_ai} AI cached")
+    else:
+        print(f"  Current folder:  {theme.slate(root.name or str(root))} (not a project)")
+    if state.get("last_ai_error"):
+        print(f"  Last AI note:    {theme.yellow(str(state['last_ai_error'])[:90])}")
     print(f"  Storage ({stats['home']}): {format_bytes(stats['total_bytes'])} across {stats['project_count']} projects\n")
     return 0
 
@@ -602,13 +669,16 @@ def cmd_token(args: argparse.Namespace) -> int:
 
 
 def cmd_fix(args: argparse.Namespace) -> int:
-    """Diagnose a failed command and show instant + AI fix suggestions."""
+    """Diagnose a failed command and show instant + optional AI fix suggestions."""
     directory = Path(args.dir or os.getcwd()).expanduser().resolve()
     cfg = load_config()
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
     cm = ContextManager(config=cfg)
+    root = resolve_project_root(directory)
+    is_tracked = cm.has_project(root) or is_project_directory(root)
     ctx = cm.load_project(directory)
     if not ctx.get("analysis"):
-        ctx["analysis"] = analyze_project(resolve_project_root(directory))
+        ctx["analysis"] = analyze_project(root)
 
     failed_cmd = args.failed_cmd or ctx.get("last_error", {}).get("cmd", "")
     exit_code = args.exit_code if args.exit_code is not None else int(ctx.get("last_error", {}).get("exit_code", 1))
@@ -619,7 +689,7 @@ def cmd_fix(args: argparse.Namespace) -> int:
 
     diag = diagnose_command_failure(failed_cmd, exit_code, directory, ctx.get("analysis"))
     fixes = list(diag["fixes"])
-    if not args.no_ai and cfg.get("openrouter_api_key"):
+    if not args.no_ai and ai_enabled and cfg.get("openrouter_api_key"):
         try:
             res = OpenRouterClient(config=cfg).generate_suggestions(
                 ctx,
@@ -636,7 +706,7 @@ def cmd_fix(args: argparse.Namespace) -> int:
         except (AuthError, AllModelsExhaustedError):
             pass
 
-    if fixes:
+    if fixes and is_tracked:
         ctx["last_error"] = {
             "cmd": failed_cmd,
             "exit_code": exit_code,
@@ -645,7 +715,7 @@ def cmd_fix(args: argparse.Namespace) -> int:
             "ts": int(time.time()),
         }
         cm.save_project(ctx)
-        write_zsh_suggestion_cache(ctx)
+        write_zsh_suggestion_cache(ctx, ai_enabled=ai_enabled)
 
     if args.json:
         print(json.dumps({"diagnosis": diag["diagnosis"], "fixes": fixes[:8]}, ensure_ascii=False))
@@ -804,9 +874,187 @@ def _settings_manage_projects(theme: Theme, cfg: dict[str, Any]) -> str:
     return f"Removed {len(removed)} project(s) ({format_bytes(freed)} freed)"
 
 
+def _refresh_stored_caches(cfg: dict[str, Any]) -> None:
+    """Rebuild TSV dropdown caches for tracked projects when AI setting changes."""
+    cm = ContextManager(config=cfg)
+    ai_enabled = bool(cfg.get("ai_suggestions_enabled", False))
+    for p in cm.list_projects()[:30]:
+        p_path = str(p.get("project_path", "")).strip()
+        if not p_path:
+            continue
+        ctx = cm.load_project(p_path)
+        write_zsh_suggestion_cache(ctx, ai_enabled=ai_enabled)
+
+
+def _warmup_current_project_ai(cfg: dict[str, Any]) -> tuple[int, str]:
+    """Synchronously warm up AI suggestions for cwd if it is a project and return (count, error_msg)."""
+    if not cfg.get("ai_suggestions_enabled") or not cfg.get("openrouter_api_key"):
+        return 0, ""
+    cwd = os.getcwd()
+    root = resolve_project_root(cwd)
+    cm = ContextManager(config=cfg)
+    if not is_project_directory(root) and not cm.has_project(cwd):
+        return 0, ""
+    ctx = cm.load_project(cwd)
+    if not ctx.get("analysis"):
+        ctx["analysis"] = analyze_project(root)
+        ctx["fingerprint"] = ctx["analysis"].get("fingerprint", "")
+        ctx["last_analyzed"] = int(time.time())
+    try:
+        res = OpenRouterClient(config=cfg).generate_suggestions(ctx, cwd=cwd, mode="analyze", timeout=7.0)
+        ctx["cached_suggestions"] = res["suggestions"]
+        ctx["last_analyzed"] = int(time.time())
+        if res.get("summary"):
+            ctx.setdefault("ai_context", {})["summary"] = res["summary"]
+        cm.append_ai_turn(ctx, f"Analyzed {root.name}", res.get("summary", ""), res["model"])
+        cm.save_project(ctx)
+        write_zsh_suggestion_cache(ctx, ai_enabled=True)
+        return len(res["suggestions"]), ""
+    except (AuthError, AllModelsExhaustedError) as exc:
+        return 0, str(exc)
+
+
+def _settings_configure_token(
+    theme: Theme,
+    cfg: dict[str, Any],
+    enable_ai: bool = False,
+) -> str:
+    """Prompt, verify, and save OpenRouter API token cleanly (shared helper)."""
+    cur_key = str(cfg.get("openrouter_api_key", ""))
+    if enable_ai and not cur_key:
+        title = "Enable AI Suggestions"
+        sub_hint = "Get a free API key at https://openrouter.ai/keys"
+        prompt_lbl = "Paste OpenRouter API key to activate AI:"
+    else:
+        title = "OpenRouter API Token"
+        sub_hint = "Current key set (enter new key below)" if cur_key else "Get free key at https://openrouter.ai/keys"
+        prompt_lbl = "Paste your OpenRouter API key:"
+
+    new_key = tui_input_card(theme, title, sub_hint, prompt_lbl, masked=True)
+    if not new_key:
+        return "Kept AI Disabled (OpenRouter key needed)" if enable_ai else ""
+
+    client = OpenRouterClient(config=cfg)
+    ok, msg, models = client.validate_key(new_key)
+    cfg["openrouter_api_key"] = new_key
+    cfg["onboarded"] = True
+    if enable_ai:
+        cfg["ai_suggestions_enabled"] = True
+    if ok:
+        client.clear_model_health()
+        available = {m["id"] for m in models}
+        cur_pref = str(cfg.get("preferred_model", ""))
+        if (not cur_pref or cur_pref not in available) and models:
+            chosen = next((m for m in DEFAULT_FREE_MODELS if m in available), models[0]["id"])
+            cfg["preferred_model"] = chosen
+        st = load_state()
+        st["active_model"] = cfg.get("preferred_model", DEFAULT_FREE_MODELS[0])
+        st["last_ai_error"] = ""
+        st["last_ai_error_at"] = 0
+        save_state(st)
+    save_config(cfg)
+    _refresh_stored_caches(cfg)
+    request_daemon("/reload-config", {}, timeout=1.5)
+    if not ok:
+        return f"Saved token (warning: {msg[:38]})"
+
+    ai_count, ai_err = _warmup_current_project_ai(cfg)
+    prefix = "AI Enabled" if enable_ai else "Token verified"
+    if ai_err:
+        return f"{prefix}, AI err: {ai_err[:42]}"
+    if ai_count:
+        return f"{prefix} ({ai_count} project suggestions ready)"
+    return f"{prefix} ({len(models)} free models)"
+
+
+def _settings_ai_menu(theme: Theme) -> str:
+    """Single AI submenu housing enable toggle, OpenRouter token, and model selector."""
+
+    def _ai_items() -> list[dict[str, str]]:
+        cfg = load_config()
+        ai_on = bool(cfg.get("ai_suggestions_enabled", False))
+        key = str(cfg.get("openrouter_api_key", ""))
+        key_badge = f"{key[:8]}...{key[-4:]}" if len(key) > 12 else ("configured" if key else "not set")
+        model_badge = str(cfg.get("preferred_model", DEFAULT_FREE_MODELS[0]))
+
+        return [
+            {
+                "id": "toggle",
+                "label": "AI Suggestions",
+                "value": "● Enabled" if ai_on else "○ Disabled",
+                "hint": "Active in dropdown" if ai_on else "Off: Recents & History only",
+                "tone": "green" if (ai_on and key) else ("cyan" if ai_on else "yellow"),
+            },
+            {
+                "id": "token",
+                "label": "OpenRouter Token",
+                "value": key_badge,
+                "hint": "Add or rotate API key",
+                "tone": "green" if key else "yellow",
+            },
+            {
+                "id": "model",
+                "label": "Preferred Model",
+                "value": model_badge,
+                "hint": "Select OpenRouter :free model",
+                "tone": "cyan",
+            },
+        ]
+
+    def _ai_select(item: dict[str, Any], _idx: int) -> str | None:
+        sub_action = item["id"]
+        cfg = load_config()
+        if sub_action == "toggle":
+            next_val = not bool(cfg.get("ai_suggestions_enabled", False))
+            if next_val and not cfg.get("openrouter_api_key"):
+                return _settings_configure_token(theme, cfg, enable_ai=True)
+            cfg["ai_suggestions_enabled"] = next_val
+            save_config(cfg)
+            _refresh_stored_caches(cfg)
+            request_daemon("/reload-config", {}, timeout=1.5)
+            if not next_val:
+                return "AI Suggestions Disabled (Recents & History only)"
+            ai_count, ai_err = _warmup_current_project_ai(cfg)
+            if ai_err:
+                return f"AI Enabled (err: {ai_err[:44]})"
+            if ai_count:
+                return f"AI Enabled ({ai_count} project suggestions ready)"
+            return "AI Suggestions Enabled"
+        if sub_action == "token":
+            return _settings_configure_token(theme, cfg, enable_ai=False)
+        if sub_action == "model":
+            return _settings_choose_model(theme, cfg)
+        return None
+
+    tui_menu_loop(
+        theme,
+        "AI Suggestions",
+        "OpenRouter :free",
+        _ai_items,
+        _ai_select,
+        footer="↑/↓ navigate · Enter/Space toggle or edit · Esc/← back",
+        width=90,
+    )
+    return ""
+
+
 def cmd_settings(args: argparse.Namespace) -> int:
     """Modern interactive arrow-key settings TUI."""
     theme = Theme()
+
+    if getattr(args, "ai", ""):
+        cfg = load_config()
+        val = args.ai.strip().lower()
+        enabled = val in ("on", "true", "1", "enable", "enabled", "yes")
+        cfg["ai_suggestions_enabled"] = enabled
+        save_config(cfg)
+        _refresh_stored_caches(cfg)
+        request_daemon("/reload-config", {}, timeout=1.5)
+        lbl = theme.green("Enabled") if enabled else theme.yellow("Disabled (recents & history only)")
+        print(f"  {theme.green('✓')} AI Suggestions: {lbl}")
+        if enabled and not cfg.get("openrouter_api_key"):
+            print(theme.dim("  Tip: Add your OpenRouter :free key with `cue token` or `cue settings`."))
+        return 0
 
     if getattr(args, "prompt_mode", ""):
         cfg = load_config()
@@ -829,24 +1077,29 @@ def cmd_settings(args: argparse.Namespace) -> int:
         cfg = load_config()
         cm = ContextManager(config=cfg)
         stats = cm.get_storage_stats()
+        ai_on = bool(cfg.get("ai_suggestions_enabled", False))
         key = str(cfg.get("openrouter_api_key", ""))
-        key_badge = f"{key[:8]}...{key[-4:]}" if len(key) > 12 else ("configured" if key else "not set")
-        model_badge = str(cfg.get("preferred_model", DEFAULT_FREE_MODELS[0]))
+        model_short = str(cfg.get("preferred_model", DEFAULT_FREE_MODELS[0])).split("/")[-1]
+        if ai_on and key:
+            ai_val = "● Enabled"
+            ai_hint = f"{model_short} · Token set"
+            ai_tone = "green"
+        elif ai_on:
+            ai_val = "● On (no key)"
+            ai_hint = "Add OpenRouter token inside"
+            ai_tone = "cyan"
+        else:
+            ai_val = "○ Disabled"
+            ai_hint = "Toggle AI, model & API token"
+            ai_tone = "yellow"
 
         return [
             {
-                "id": "model",
-                "label": "Preferred Model",
-                "value": model_badge,
-                "hint": "Select OpenRouter :free model",
-                "tone": "cyan",
-            },
-            {
-                "id": "token",
-                "label": "OpenRouter Token",
-                "value": key_badge,
-                "hint": "Add or rotate API key",
-                "tone": "green" if key else "yellow",
+                "id": "ai",
+                "label": "AI Suggestions",
+                "value": ai_val,
+                "hint": ai_hint,
+                "tone": ai_tone,
             },
             {
                 "id": "projects",
@@ -874,44 +1127,13 @@ def cmd_settings(args: argparse.Namespace) -> int:
     def _on_select(item: dict[str, Any], _idx: int) -> str | None:
         action = item["id"]
         cfg = load_config()
+        if action == "ai":
+            return _settings_ai_menu(theme)
         if action == "prompt_mode":
             cfg["prompt_mode"] = not bool(cfg.get("prompt_mode", False))
             save_config(cfg)
             request_daemon("/reload-config", {}, timeout=1.5)
             return f"Prompt Mode {'Enabled' if cfg['prompt_mode'] else 'Disabled'}"
-        if action == "model":
-            return _settings_choose_model(theme, cfg)
-        if action == "token":
-            cur_key = str(cfg.get("openrouter_api_key", ""))
-            sub_hint = "Current key set (enter new key below)" if cur_key else "Get free key at https://openrouter.ai/keys"
-            new_key = tui_input_card(
-                theme,
-                "OpenRouter API Token",
-                sub_hint,
-                "Paste your OpenRouter API key:",
-                masked=True,
-            )
-            if not new_key:
-                return ""
-            client = OpenRouterClient(config=cfg)
-            ok, msg, models = client.validate_key(new_key)
-            cfg["openrouter_api_key"] = new_key
-            cfg["onboarded"] = True
-            save_config(cfg)
-            if ok:
-                client.clear_model_health()
-                available = {m["id"] for m in models}
-                if cfg.get("preferred_model") not in available and models:
-                    chosen = next((m for m in DEFAULT_FREE_MODELS if m in available), models[0]["id"])
-                    cfg["preferred_model"] = chosen
-                    save_config(cfg)
-                    st = load_state()
-                    st["active_model"] = chosen
-                    save_state(st)
-                request_daemon("/reload-config", {}, timeout=1.5)
-                return f"Token verified ({len(models)} free models)"
-            request_daemon("/reload-config", {}, timeout=1.5)
-            return f"Saved token (warning: {msg[:45]})"
         if action == "projects":
             return _settings_manage_projects(theme, cfg)
         if action == "cleanup":
@@ -1212,6 +1434,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.set_defaults(func=cmd_ask)
 
     p_settings = sub.add_parser("settings", help="Open interactive cue settings TUI")
+    p_settings.add_argument("--ai", default="", help="Enable/disable AI suggestions (on|off)")
     p_settings.add_argument("--prompt-mode", default="", help="Enable/disable prompt mode (on|off)")
     p_settings.set_defaults(func=cmd_settings)
 

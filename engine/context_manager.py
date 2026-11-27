@@ -18,6 +18,7 @@ from .config import (
     load_config,
     read_json_safe,
 )
+from .project_analyzer import is_project_directory
 
 SENSITIVE_CMD_PATTERNS = [
     re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd|auth)\s*="),
@@ -107,6 +108,11 @@ class ContextManager:
             },
             "cached_suggestions": [],
         }
+
+    def has_project(self, directory: str | Path) -> bool:
+        """Return True if a stored context file already exists for directory's project root."""
+        root = resolve_project_root(directory)
+        return self.project_file(make_project_id(root)).exists()
 
     def load_project(self, directory: str | Path) -> dict[str, Any]:
         """Load (or initialize in memory) context for the project containing directory."""
@@ -243,6 +249,7 @@ class ContextManager:
         directory: str | Path,
         command: str,
         exit_code: int = 0,
+        project_only: bool = False,
     ) -> dict[str, Any] | None:
         """Record a shell command executed in directory into that project's context."""
         cmd = command.strip()
@@ -251,6 +258,10 @@ class ContextManager:
 
         # Skip recording cue's own maintenance commands to reduce noise
         if cmd.startswith("cue ") or cmd == "cue":
+            return None
+
+        root = resolve_project_root(directory)
+        if project_only and not is_project_directory(root) and not self.has_project(root):
             return None
 
         ctx = self.load_project(directory)

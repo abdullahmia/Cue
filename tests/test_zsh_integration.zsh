@@ -27,7 +27,8 @@ zsh -c '
   (( $+functions[_cue_arrow_down] )) || { echo "Missing _cue_arrow_down"; exit 1; }
   (( $+functions[_cue_render_dropdown] )) || { echo "Missing _cue_render_dropdown"; exit 1; }
 
-  # Pre-seed project suggestions in memory and test filtering + dropdown rendering
+  # Pre-seed project suggestions in memory and test filtering + dropdown rendering (AI enabled)
+  _CUE_AI_ENABLED=1
   _CUE_PROJ_SRCS=(ai proj script)
   _CUE_PROJ_CMDS=("pnpm dev" "pnpm test" "git status")
   _CUE_PROJ_REASONS=("Start dev server" "Project recent (1m ago)" "Check git tree")
@@ -45,6 +46,16 @@ zsh -c '
   [[ "${_CUE_ITEMS_CMD[1]}" == "pnpm test" ]] || { echo "Expected Recent command first, got: ${_CUE_ITEMS_CMD[1]}"; exit 1; }
   [[ "${_CUE_ITEMS_CMD[2]}" == "pnpm dev" ]] || { echo "Expected AI command second, got: ${_CUE_ITEMS_CMD[2]}"; exit 1; }
 
+  # Verify disabling AI hides AI suggestions (Recents + Scripts/History only)
+  _CUE_AI_ENABLED=0
+  _cue_refresh_suggestions
+  [[ "${_CUE_ITEMS_CMD[1]}" == "pnpm test" ]] || { echo "Expected Recent command when AI disabled, got: ${_CUE_ITEMS_CMD[1]}"; exit 1; }
+  [[ " ${_CUE_ITEMS_SRC[*]} " != *" ai "* ]] || { echo "Did not expect AI items when _CUE_AI_ENABLED=0"; exit 1; }
+  _cue_render_dropdown
+  [[ "$POSTDISPLAY" == *"local"* ]] || { echo "Expected local label in header when AI disabled"; exit 1; }
+
+  _CUE_AI_ENABLED=1
+  _cue_refresh_suggestions
   _cue_render_dropdown
   [[ "$POSTDISPLAY" == *"✦ cue"* ]] || { echo "Dropdown box header missing in POSTDISPLAY"; exit 1; }
   [[ "$POSTDISPLAY" == *"pnpm dev"* ]] || { echo "Expected command missing in POSTDISPLAY"; exit 1; }
@@ -145,5 +156,57 @@ glob_check="$(zsh -f -c '
   eval "cue prompt --json What will be command"
 ' 2>&1)" || { echo "cue ask/prompt failed: $glob_check"; exit 1; }
 [[ "$glob_check" != *"no matches found"* ]] || { echo "Unexpected glob error: $glob_check"; exit 1; }
+
+# Verify native Tab path completion (`cd ap` + Tab -> `cd apps/`) after re-sourcing without FUNCNEST recursion
+python3 - "$PLUGIN_DIR" "$TMP_HOME" <<'PY'
+import os, pty, re, select, subprocess, time, sys
+from pathlib import Path
+
+plugin_dir, tmp_home = sys.argv[1], sys.argv[2]
+ws = Path(tmp_home) / "tab_ws"
+(ws / "apps").mkdir(parents=True)
+(ws / "package.json").write_text('{"name":"tab_ws"}')
+
+master, slave = pty.openpty()
+env = dict(os.environ, CUE_HOME=f"{tmp_home}/.cue", CUE_NO_ONBOARD="1", TERM="xterm-256color")
+proc = subprocess.Popen(["zsh", "-f", "-i"], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=str(ws))
+os.close(slave)
+out = b""
+
+def read_some(wait=0.4):
+    global out
+    end = time.time() + wait
+    while time.time() < end:
+        r, _, _ = select.select([master], [], [], 0.05)
+        if r:
+            try:
+                out += os.read(master, 8192)
+            except OSError:
+                break
+
+try:
+    read_some(0.4)
+    os.write(master, b"autoload -Uz compinit && compinit -C\r")
+    read_some(0.5)
+    os.write(master, f"source {plugin_dir}/cue.plugin.zsh\r".encode())
+    read_some(0.6)
+    # Re-source plugin (which previously caused _cue_tab_accept FUNCNEST recursion)
+    os.write(master, f"source {plugin_dir}/cue.plugin.zsh\r".encode())
+    read_some(0.6)
+    os.write(master, b"cd ap\t")
+    read_some(0.5)
+    os.write(master, b"\x07\r")
+    read_some(0.2)
+    os.write(master, b"exit\r")
+    read_some(0.4)
+finally:
+    proc.terminate()
+    proc.wait(timeout=2)
+    os.close(master)
+
+clean = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", out.decode("utf-8", errors="replace"))
+assert "FUNCNEST" not in clean and "maximum nested" not in clean, f"Tab recursion detected: {clean}"
+assert "apps/" in clean, f"Expected native Tab completion 'apps/', got: {clean[-500:]}"
+PY
 
 echo "Zsh integration checks passed!"

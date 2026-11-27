@@ -4,7 +4,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
-export CUE_VERSION="0.0.1"
+export CUE_VERSION="0.1.0"
 export CUE_PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -z "${CUE_HOME:-}" ]]; then
   if [[ -d "$HOME/.cue" && ( -f "$HOME/.cue/.cue_home" || -f "$HOME/.cue/config.json" || ( -d "$HOME/.cue/projects" && -d "$HOME/.cue/cache" ) ) ]]; then
@@ -87,13 +87,15 @@ _cue_bash_dropdown() {
   selected="$(PYTHONPATH="${CUE_PLUGIN_DIR}${PYTHONPATH:+:$PYTHONPATH}" "$pybin" -c '
 import os, sys, termios, tty
 from pathlib import Path
+from engine.config import load_config
 from engine.context_manager import ContextManager
 from engine.suggester import build_ranked_suggestions
 
-cm = ContextManager()
+cfg = load_config()
+cm = ContextManager(config=cfg)
 ctx = cm.load_project(os.getcwd())
 query = sys.argv[1] if len(sys.argv) > 1 else ""
-items = build_ranked_suggestions(ctx, partial_input=query, limit=12)
+items = build_ranked_suggestions(ctx, partial_input=query, limit=12, ai_enabled=bool(cfg.get("ai_suggestions_enabled", False)))
 if not items:
     sys.exit(0)
 

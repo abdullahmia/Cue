@@ -27,11 +27,12 @@ function _cue_unhook_current_shell() {
   fi
   zle -A .self-insert self-insert 2>/dev/null || true
   zle -A .backward-delete-char backward-delete-char 2>/dev/null || true
-  if (( $+widgets[_cue_orig_tab_widget] )); then
-    zle -A _cue_orig_tab_widget expand-or-complete 2>/dev/null || true
-  else
-    zle -A .expand-or-complete expand-or-complete 2>/dev/null || true
-  fi
+  local restore_tab="${_CUE_ORIG_TAB_WIDGET:-expand-or-complete}"
+  [[ "$restore_tab" == "_cue_tab_accept" ]] && restore_tab="expand-or-complete"
+  local kmap
+  for kmap in main emacs viins; do
+    bindkey -M "$kmap" '^I' "$restore_tab" 2>/dev/null || true
+  done
   zle -D zle-line-init 2>/dev/null || true
   add-zle-hook-widget -d line-pre-redraw _cue_post_redraw 2>/dev/null || true
   unalias cue 2>/dev/null || true
@@ -45,6 +46,11 @@ function cue() {
   case "$1" in
     onboard|token|key|fix|analyze|suggest|ask|prompt|settings|models|context|config)
       _cue_load_dir_cache "$PWD" 2>/dev/null
+      if [[ "$1" == "settings" || "$1" == "token" || "$1" == "key" ]] && (( _CUE_AI_ENABLED )); then
+        if (( ${_CUE_PROJ_SRCS[(Ie)ai]} == 0 )); then
+          _cue_spawn_analyze "$PWD" 2>/dev/null || true
+        fi
+      fi
       ;;
     uninstall)
       if (( rc == 0 )); then

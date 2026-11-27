@@ -10,6 +10,7 @@ typeset -g _CUE_GHOST_CMD=""
 typeset -g _CUE_GHOST_HINT=""
 typeset -g _CUE_LAST_POSTDISPLAY=""
 typeset -ga _CUE_LAST_BOX_HL
+typeset -gi _CUE_IN_TAB_ACCEPT=0
 
 typeset -ga _CUE_ITEMS_SRC
 typeset -ga _CUE_ITEMS_CMD
@@ -86,11 +87,12 @@ function _cue_refresh_suggestions() {
       (( ${#_CUE_ITEMS_CMD} >= 60 )) && break
     done
 
-    # 3. Append fixes, AI, and scripts
+    # 3. Append fixes, scripts, and AI (only when AI is enabled)
     for (( i=1; i<=n; i++ )); do
       cmd="${_CUE_PROJ_CMDS[$i]}"
       src="${_CUE_PROJ_SRCS[$i]}"
       reason="${_CUE_PROJ_REASONS[$i]}"
+      [[ "$src" == "ai" && $_CUE_AI_ENABLED -eq 0 ]] && continue
       if _cue_matches_query "$cmd" "$trimmed" && [[ -z "${seen_cmds[$cmd]}" ]]; then
         seen_cmds[$cmd]=1
         _CUE_ITEMS_SRC+=("$src")
@@ -135,7 +137,7 @@ function _cue_refresh_suggestions() {
             fi
             ;;
           ai)
-            if (( ${#ai_c} < 12 )); then
+            if (( _CUE_AI_ENABLED && ${#ai_c} < 12 )); then
               seen_cmds[$cmd]=1
               ai_s+=("$src"); ai_c+=("$cmd"); ai_r+=("$reason")
             fi
@@ -273,7 +275,10 @@ function _cue_render_dropdown() {
 
   # Header bar with mode indicator
   local stack_lbl="${_CUE_ACTIVE_STACK:-folder}"
-  local model_lbl="${_CUE_ACTIVE_MODEL:-local}"
+  local model_lbl="local"
+  if (( _CUE_AI_ENABLED )); then
+    model_lbl="${_CUE_ACTIVE_MODEL:-ai}"
+  fi
   local mode_lbl="SMART"
   if [[ "$_CUE_MODE" == "history" ]]; then
     mode_lbl="HISTORY"
@@ -409,7 +414,10 @@ function _cue_render_dropdown() {
   done
 
   # Footer bar
-  local ftr_text=" ↑/↓ select · Tab/→ fill · Enter run · ^Space AI · Esc close "
+  local ftr_text=" ↑/↓ select · Tab/→ fill · Enter run · Esc close "
+  if (( _CUE_AI_ENABLED )); then
+    ftr_text=" ↑/↓ select · Tab/→ fill · Enter run · ^Space AI · Esc close "
+  fi
   if (( ${#ftr_text} > inner_w - 2 )); then
     ftr_text=" ↑/↓ select · Tab fill · Enter run · Esc close "
   fi
@@ -458,7 +466,7 @@ function _cue_self_insert() {
   _CUE_MENU_OPEN=1
   _cue_refresh_suggestions
   _cue_render_dropdown
-  if (( ${#BUFFER} >= 2 )); then
+  if (( _CUE_AI_ENABLED )) && (( ${#BUFFER} >= 2 )); then
     _cue_schedule_ai_suggest "$BUFFER"
   fi
 }
@@ -540,25 +548,40 @@ function _cue_arrow_right() {
 }
 
 function _cue_tab_accept() {
+  if (( _CUE_IN_TAB_ACCEPT )); then
+    _cue_clear_ui
+    zle .expand-or-complete
+    return $?
+  fi
+  _CUE_IN_TAB_ACCEPT=1
+
   if (( _CUE_MENU_OPEN && _CUE_MENU_INDEX >= 0 )); then
     BUFFER="${_CUE_ITEMS_CMD[$(( _CUE_MENU_INDEX + 1 ))]}"
     CURSOR=${#BUFFER}
     _cue_clear_ui
     zle -R
+    _CUE_IN_TAB_ACCEPT=0
     return 0
-  elif [[ -n "$_CUE_GHOST_CMD" ]]; then
+  elif [[ -n "$_CUE_GHOST_CMD" ]] && { [[ -n "$_CUE_GHOST_HINT" ]] || [[ -z "$BUFFER" ]]; }; then
+    # Accept inline fix/retry ghost prompt cleanly on Tab; preserve native path completion while typing
     BUFFER="$_CUE_GHOST_CMD"
     CURSOR=${#BUFFER}
     _cue_clear_ui
     zle -R
+    _CUE_IN_TAB_ACCEPT=0
     return 0
   fi
+
   _cue_clear_ui
-  if (( $+widgets[_cue_orig_tab_widget] )); then
-    zle _cue_orig_tab_widget
+  local orig_w="${_CUE_ORIG_TAB_WIDGET:-}"
+  if [[ -n "$orig_w" && "$orig_w" != "_cue_tab_accept" && "$orig_w" != *"expand-or-complete"* ]] && (( $+widgets[$orig_w] )); then
+    zle "$orig_w"
   else
     zle .expand-or-complete
   fi
+  local rc=$?
+  _CUE_IN_TAB_ACCEPT=0
+  return $rc
 }
 
 function _cue_accept_line() {
@@ -581,7 +604,9 @@ function _cue_trigger_ai_now() {
   _CUE_MENU_INDEX=0
   _cue_refresh_suggestions
   _cue_render_dropdown
-  _cue_schedule_ai_suggest "$BUFFER"
+  if (( _CUE_AI_ENABLED )); then
+    _cue_schedule_ai_suggest "$BUFFER"
+  fi
 }
 
 function _cue_async_redraw() {
@@ -627,11 +652,21 @@ function _cue_register_widgets_and_keys() {
   fi
   zle -N self-insert _cue_self_insert
   zle -N backward-delete-char _cue_backward_delete
-  if [[ "${widgets[expand-or-complete]}" != "user:_cue_tab_accept" ]]; then
-    if (( $+widgets[expand-or-complete] )); then
-      zle -A expand-or-complete _cue_orig_tab_widget 2>/dev/null || true
+
+  # Capture pre-existing Tab widget (e.g. fzf-completion) once without overwriting expand-or-complete
+  if [[ -z "${_CUE_ORIG_TAB_WIDGET:-}" ]]; then
+    local tab_bind
+    tab_bind="$(bindkey -M main '^I' 2>/dev/null || true)"
+    local prev_tab="${tab_bind##* }"
+    if [[ -n "$prev_tab" && "$prev_tab" != "_cue_tab_accept" && "$prev_tab" != *"_zsh_highlight_widget"* ]]; then
+      typeset -g _CUE_ORIG_TAB_WIDGET="$prev_tab"
+    else
+      typeset -g _CUE_ORIG_TAB_WIDGET="expand-or-complete"
     fi
-    zle -N expand-or-complete _cue_tab_accept
+  fi
+  # Clean up any legacy self-referential alias from earlier sessions
+  if [[ "${widgets[expand-or-complete]}" == "user:_cue_tab_accept" ]]; then
+    zle -A .expand-or-complete expand-or-complete 2>/dev/null || true
   fi
   zle -N _cue_arrow_down
   zle -N _cue_arrow_up

@@ -24,6 +24,7 @@ typeset -ga _CUE_PROJ_REASONS
 typeset -g _CUE_ACTIVE_STACK=""
 typeset -g _CUE_ACTIVE_MODEL=""
 typeset -g _CUE_CURRENT_PID=""
+typeset -gi _CUE_AI_ENABLED=0
 typeset -gi _CUE_PROMPT_MODE=0
 typeset -gi _CUE_POST_INIT_BOUND=0
 
@@ -70,6 +71,8 @@ function _cue_load_dir_cache() {
   _CUE_PROJ_SRCS=()
   _CUE_PROJ_CMDS=()
   _CUE_PROJ_REASONS=()
+  _CUE_ACTIVE_STACK=""
+  _CUE_CURRENT_PID=""
 
   # 1. Look up existing project context in ~/.cue via dir_map.tsv
   local pid=""
@@ -127,12 +130,19 @@ for pid, info in data.items():
       _CUE_ACTIVE_MODEL="${pref_model##*/}"
     fi
   fi
+  _CUE_AI_ENABLED=0
   _CUE_PROMPT_MODE=0
   if [[ -f "$cfg_file" ]]; then
     local cfg_pm_raw="$(<"$cfg_file")"
+    if [[ "$cfg_pm_raw" =~ '"ai_suggestions_enabled"[[:space:]]*:[[:space:]]*true' ]]; then
+      _CUE_AI_ENABLED=1
+    fi
     if [[ "$cfg_pm_raw" =~ '"prompt_mode"[[:space:]]*:[[:space:]]*true' ]]; then
       _CUE_PROMPT_MODE=1
     fi
+  fi
+  if (( ! _CUE_AI_ENABLED )); then
+    _CUE_ACTIVE_MODEL="local"
   fi
 
   # Ensure TSV cache exists if project JSON exists in ~/.cue/projects
@@ -198,6 +208,7 @@ function _cue_spawn_analyze() {
 
 function _cue_schedule_ai_suggest() {
   setopt LOCAL_OPTIONS NO_BG_NICE
+  (( ! _CUE_AI_ENABLED )) && return 0
   local query="$1"
   local target_dir="$PWD"
   local pybin="$(_cue_python)"
@@ -217,7 +228,7 @@ function _cue_schedule_ai_suggest() {
   local suggest_mode="complete"
 
   (
-    sleep 0.30
+    sleep 0.75
     PYTHONPATH="${plugin_dir}${PYTHONPATH:+:$PYTHONPATH}" "$pybin" -m engine.cli suggest --dir "$target_dir" --input "$query" --mode "$suggest_mode" --live --json >/dev/null 2>&1
     [[ -p "$fifo" ]] && print -r -- "suggest:${my_gen}:${target_dir}" > "$fifo" 2>/dev/null
   ) &!
@@ -261,7 +272,7 @@ function _cue_precmd_hook() {
   if (( $+functions[_zsh_autosuggest_disable] )); then
     _zsh_autosuggest_disable 2>/dev/null
   fi
-  if (( ! _CUE_POST_INIT_BOUND )) || [[ "${widgets[self-insert]}" != "user:_cue_self_insert" || "${widgets[expand-or-complete]}" != "user:_cue_tab_accept" ]]; then
+  if (( ! _CUE_POST_INIT_BOUND )) || { [[ "${widgets[self-insert]}" != "user:_cue_self_insert" && "${widgets[self-insert]}" != *"_zsh_highlight_widget"* ]] } || [[ "$(bindkey -M main '^I' 2>/dev/null)" != *"_cue_tab_accept" ]]; then
     _CUE_POST_INIT_BOUND=1
     _cue_register_widgets_and_keys 2>/dev/null
   fi
@@ -287,12 +298,14 @@ function _cue_precmd_hook() {
         if [[ "${_CUE_PROJ_SRCS[1]}" == "fix" ]]; then
           _CUE_AUTO_SHOW_FIX=1
         fi
-        # Also enrich with AI fix suggestions asynchronously
-        local fifo="$_CUE_FIFO"
-        (
-          PYTHONPATH="${plugin_dir}${PYTHONPATH:+:$PYTHONPATH}" "$pybin" -m engine.cli fix --dir "$cmd_dir" --exit-code "$last_exit" --json "$cmd_to_save" >/dev/null 2>&1
-          [[ -p "$fifo" ]] && print -r -- "fix:$cmd_dir" > "$fifo" 2>/dev/null
-        ) &!
+        # Also enrich with AI fix suggestions asynchronously when AI is enabled
+        if (( _CUE_AI_ENABLED )); then
+          local fifo="$_CUE_FIFO"
+          (
+            PYTHONPATH="${plugin_dir}${PYTHONPATH:+:$PYTHONPATH}" "$pybin" -m engine.cli fix --dir "$cmd_dir" --exit-code "$last_exit" --json "$cmd_to_save" >/dev/null 2>&1
+            [[ -p "$fifo" ]] && print -r -- "fix:$cmd_dir" > "$fifo" 2>/dev/null
+          ) &!
+        fi
       fi
     else
       _CUE_AUTO_SHOW_FIX=0

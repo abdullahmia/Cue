@@ -17,12 +17,13 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from engine import __version__
 from engine.cli import main as cli_main, uninstall_cue_plugin
 from engine.config import DEFAULT_FREE_MODELS, load_config, load_state, migrate_legacy_tawh_home, resolve_default_cue_home, save_config
 from engine.context_manager import ContextManager, is_sensitive_command, make_project_id, resolve_project_root
 from engine.error_fixer import diagnose_command_failure
-from engine.openrouter_client import AllModelsExhaustedError, AuthError, OpenRouterClient, _build_ssl_context, is_free_model
-from engine.project_analyzer import analyze_project
+from engine.openrouter_client import AllModelsExhaustedError, AuthError, OpenRouterClient, _build_ssl_context, _extract_json_object, is_free_model
+from engine.project_analyzer import analyze_project, is_project_directory
 from engine.suggester import build_ranked_suggestions, write_zsh_suggestion_cache
 from engine.tui import Theme, draw_card, pad_visible, visible_len
 
@@ -506,7 +507,7 @@ class TestSettingsPromptModeAndUninstall(unittest.TestCase):
                                 "content": json.dumps(
                                     {
                                         "suggestions": [{"cmd": "cue --version", "reason": "Show installed cue version"}],
-                                        "summary": "cue plugin version is 0.0.1",
+                                        "summary": f"cue plugin version is {__version__}",
                                     }
                                 )
                             }
@@ -527,7 +528,7 @@ class TestSettingsPromptModeAndUninstall(unittest.TestCase):
                                 rc_json = cli_main(["ask", "--dir", str(proj), "--json", "what", "is", "the", "version?"])
                             self.assertEqual(rc_json, 0)
                             payload = json.loads(buf_json.getvalue())
-                            self.assertEqual(payload["answer"], "cue plugin version is 0.0.1")
+                            self.assertEqual(payload["answer"], f"cue plugin version is {__version__}")
                             self.assertEqual(payload["suggestions"][0]["cmd"], "cue --version")
 
                             buf_tsv = io.StringIO()
@@ -535,7 +536,7 @@ class TestSettingsPromptModeAndUninstall(unittest.TestCase):
                                 rc_tsv = cli_main(["ask", "--dir", str(proj), "--tsv", "what", "is", "the", "version?"])
                             self.assertEqual(rc_tsv, 0)
                             lines = buf_tsv.getvalue().splitlines()
-                            self.assertTrue(lines[0].startswith("answer\tcue plugin version is 0.0.1\t"))
+                            self.assertTrue(lines[0].startswith(f"answer\tcue plugin version is {__version__}\t"))
                             self.assertEqual(lines[1], "ai\tcue --version\tShow installed cue version")
 
     def test_uninstall_removes_rc_and_data(self) -> None:
@@ -558,7 +559,7 @@ class TestSettingsPromptModeAndUninstall(unittest.TestCase):
         card = draw_card(
             theme,
             theme.cyan("✦ cue") + " · Settings",
-            theme.dim("v0.0.1"),
+            theme.dim(f"v{__version__}"),
             [f"  {theme.bold('Prompt Mode')}  {theme.green('● Enabled')}", "---", "  Item 2"],
             footer="↑/↓ move · Esc exit",
             width=72,
@@ -567,6 +568,215 @@ class TestSettingsPromptModeAndUninstall(unittest.TestCase):
         self.assertEqual(len(widths), 1)
         self.assertTrue(all("│" in line or "╭" in line or "╰" in line or "├" in line for line in card))
         self.assertEqual(visible_len(pad_visible(theme.bold("abc"), 10)), 10)
+
+
+class TestImprovementsAndAiResilience(unittest.TestCase):
+    def test_onboard_skips_api_key_and_non_project_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            plain_dir = Path(tmp) / "downloads"
+            plain_dir.mkdir()
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(plain_dir)
+                with mock.patch.dict(os.environ, {"CUE_HOME": str(cue_home)}):
+                    with mock.patch("engine.cli.ensure_daemon_running", return_value=True):
+                        buf = io.StringIO()
+                        with redirect_stdout(buf):
+                            rc = cli_main(["onboard"])
+            finally:
+                os.chdir(old_cwd)
+            self.assertEqual(rc, 0)
+            cfg = load_config(home=cue_home)
+            self.assertTrue(cfg["onboarded"])
+            self.assertEqual(cfg["openrouter_api_key"], "")
+            self.assertFalse(cfg["ai_suggestions_enabled"])
+            project_files = [p for p in (cue_home / "projects").glob("*.json") if p.name != "index.json"]
+            self.assertEqual(project_files, [])
+
+    def test_analyze_and_record_only_track_actual_projects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            non_proj = Path(tmp) / "random_notes"
+            non_proj.mkdir()
+            (non_proj / "notes.txt").write_text("hello", encoding="utf-8")
+
+            real_proj = Path(tmp) / "my_node_app"
+            real_proj.mkdir()
+            (real_proj / "package.json").write_text('{"name":"app","scripts":{"dev":"vite"}}', encoding="utf-8")
+
+            self.assertFalse(is_project_directory(non_proj))
+            self.assertFalse(is_project_directory(Path.home()))
+            self.assertTrue(is_project_directory(real_proj))
+
+            with mock.patch.dict(os.environ, {"CUE_HOME": str(cue_home)}):
+                with mock.patch("engine.cli.ensure_daemon_running", return_value=True):
+                    with mock.patch("engine.cli.request_daemon", return_value=None):
+                        buf1 = io.StringIO()
+                        with redirect_stdout(buf1):
+                            rc1 = cli_main(["analyze", "--dir", str(non_proj), "--json"])
+                        self.assertEqual(rc1, 0)
+                        out1 = json.loads(buf1.getvalue())
+                        self.assertTrue(out1["skipped"])
+                        self.assertFalse(out1["is_project"])
+
+                        rc_rec = cli_main(["record", "--dir", str(non_proj), "--exit-code", "0", "--no-ai", "ls -la"])
+                        self.assertEqual(rc_rec, 0)
+                        project_files = [p for p in (cue_home / "projects").glob("*.json") if p.name != "index.json"]
+                        self.assertEqual(project_files, [])
+
+                        buf2 = io.StringIO()
+                        with redirect_stdout(buf2):
+                            rc2 = cli_main(["analyze", "--dir", str(real_proj), "--json"])
+                        self.assertEqual(rc2, 0)
+                        out2 = json.loads(buf2.getvalue())
+                        self.assertFalse(out2["skipped"])
+                        self.assertTrue(out2["is_project"])
+                        project_files_after = [p for p in (cue_home / "projects").glob("*.json") if p.name != "index.json"]
+                        self.assertEqual(len(project_files_after), 1)
+
+    def test_ai_suggestions_optional_and_cache_preserves_ai_slots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            proj = Path(tmp) / "webapp"
+            proj.mkdir()
+            (proj / "package.json").write_text('{"name":"webapp","scripts":{"dev":"next dev"}}', encoding="utf-8")
+
+            save_config({"ai_suggestions_enabled": False}, home=cue_home)
+            cm = ContextManager(home=cue_home)
+            ctx = cm.load_project(proj)
+            now = int(time.time())
+            ctx["recent_commands"] = [{"cmd": f"cmd_{i}", "exit_code": 0, "ts": now + i, "count": 1} for i in range(60)]
+            ctx["cached_suggestions"] = [{"cmd": "npm run dev", "reason": "Start Next dev server"}]
+            ctx["analysis"] = analyze_project(proj)
+            cm.save_project(ctx)
+
+            # Disabled: TSV cache and ranked list omit AI suggestions
+            tsv_off = write_zsh_suggestion_cache(ctx, home=cue_home)
+            self.assertNotIn("ai\tnpm run dev", tsv_off.read_text(encoding="utf-8"))
+            self.assertTrue(all(r["source"] != "ai" for r in build_ranked_suggestions(ctx, ai_enabled=False)))
+
+            # Toggle ON via settings CLI: TSV cache preserves AI despite 60 recent commands
+            with mock.patch.dict(os.environ, {"CUE_HOME": str(cue_home)}):
+                with mock.patch("engine.cli.request_daemon", return_value=None):
+                    rc_on = cli_main(["settings", "--ai", "on"])
+                    self.assertEqual(rc_on, 0)
+            self.assertTrue(load_config(home=cue_home)["ai_suggestions_enabled"])
+            self.assertIn("ai\tnpm run dev\tStart Next dev server", tsv_off.read_text(encoding="utf-8"))
+
+            with mock.patch.dict(os.environ, {"CUE_HOME": str(cue_home)}):
+                with mock.patch("engine.cli.request_daemon", return_value=None):
+                    rc_off = cli_main(["settings", "--ai", "off"])
+                    self.assertEqual(rc_off, 0)
+            self.assertFalse(load_config(home=cue_home)["ai_suggestions_enabled"])
+            self.assertNotIn("ai\tnpm run dev", tsv_off.read_text(encoding="utf-8"))
+
+    def test_openrouter_gemma_fallback_and_truncated_json_and_tree_context(self) -> None:
+        import io as _io
+        import urllib.error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            proj = Path(tmp) / "py_service"
+            proj.mkdir()
+            (proj / "pyproject.toml").write_text('[project]\nname="svc"\n[project.scripts]\nsvc-cli = "svc:main"\n', encoding="utf-8")
+            (proj / "tests").mkdir()
+            (proj / "tests" / "test_app.py").write_text("import unittest\n", encoding="utf-8")
+
+            save_config({"openrouter_api_key": "sk-or-v1-test", "preferred_model": "google/gemma-3-12b-it:free"}, home=cue_home)
+            client = OpenRouterClient(home=cue_home)
+            cm = ContextManager(home=cue_home)
+            ctx = cm.load_project(proj)
+            ctx["analysis"] = analyze_project(proj)
+
+            seen_payloads: list[list[dict[str, str]]] = []
+
+            def fake_post(api_key: str, model_id: str, messages: list[dict[str, str]], timeout: float = 9.0):
+                seen_payloads.append(messages)
+                if len(seen_payloads) == 1:
+                    raise urllib.error.HTTPError(
+                        url="https://openrouter.ai/api/v1/chat/completions",
+                        code=400,
+                        msg="Bad Request",
+                        hdrs=None,
+                        fp=_io.BytesIO(b'{"error":{"message":"Developer instruction is not enabled for models/gemma-3-12b-it"}}'),
+                    )
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '<think>thinking...</think>{"suggestions":[{"cmd":"`python3 -m unittest discover -s tests -v`","reason":"Run unit tests"},{"cmd":"rm -rf /","reason":"Dangerous"},{"cmd":"$ svc-cli --help","reason":"Inspect CLI entrypoint"},{"cmd":"incomplete'
+                            }
+                        }
+                    ]
+                }
+
+            with mock.patch.object(client, "fetch_free_models", return_value=[{"id": m, "name": m, "context_length": 32768} for m in DEFAULT_FREE_MODELS]):
+                with mock.patch.object(client, "_post_chat_completion", side_effect=fake_post):
+                    res = client.generate_suggestions(ctx, partial_input="", cwd=str(proj), mode="analyze")
+
+            self.assertEqual(len(seen_payloads), 2)
+            # First request uses single system message and includes tree context
+            sys_msgs = [m for m in seen_payloads[0] if m["role"] == "system"]
+            self.assertEqual(len(sys_msgs), 1)
+            self.assertIn('"tree":', seen_payloads[0][-1]["content"])
+            self.assertIn("tests/test_app.py", seen_payloads[0][-1]["content"])
+            # Fallback request folded system instructions into user message
+            self.assertEqual([m for m in seen_payloads[1] if m["role"] == "system"], [])
+            cmds = [s["cmd"] for s in res["suggestions"]]
+            self.assertEqual(cmds, ["python3 -m unittest discover -s tests -v", "svc-cli --help"])
+
+            recovered = _extract_json_object('{"suggestions":[{"cmd":"git status","reason":"Check git"}],"summary":"Done')
+            self.assertIsNotNone(recovered)
+            self.assertEqual(recovered["suggestions"][0]["cmd"], "git status")
+
+    def test_post_chat_completion_tls_and_privacy_error_state(self) -> None:
+        from engine.daemon import _daemon_matches_current
+        import http.client
+        import urllib.error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cue_home = Path(tmp) / ".cue"
+            save_config({"openrouter_api_key": "sk-or-v1-test", "ai_suggestions_enabled": True}, home=cue_home)
+            client = OpenRouterClient(home=cue_home)
+
+            class FakeResp:
+                status = 200
+                reason = "OK"
+                headers = {}
+
+                def read(self) -> bytes:
+                    return json.dumps({"choices": [{"message": {"content": '{"suggestions":[{"cmd":"pytest","reason":"Run tests"}]}'}}]}).encode("utf-8")
+
+            fake_conn = mock.MagicMock()
+            fake_conn.getresponse.return_value = FakeResp()
+            with mock.patch.object(http.client, "HTTPSConnection", return_value=fake_conn):
+                out = client._post_chat_completion("sk-or-v1-test", "qwen/qwen3-coder:free", [{"role": "user", "content": "hi"}])
+            self.assertIn("choices", out)
+
+            cm = ContextManager(home=cue_home)
+            proj = Path(tmp) / "p"
+            proj.mkdir()
+            ctx = cm.load_project(proj)
+
+            def fail_privacy(api_key: str, model_id: str, messages: list[dict[str, str]], timeout: float = 9.0):
+                import io as _io
+                raise urllib.error.HTTPError(
+                    url="https://openrouter.ai/api/v1/chat/completions",
+                    code=404,
+                    msg="Not Found",
+                    hdrs=None,
+                    fp=_io.BytesIO(b'{"error":{"message":"No endpoints found matching your data policy (Free model publication)"}}'),
+                )
+
+            with mock.patch.object(client, "fetch_free_models", return_value=[{"id": m, "name": m, "context_length": 32768} for m in DEFAULT_FREE_MODELS]):
+                with mock.patch.object(client, "_post_chat_completion", side_effect=fail_privacy):
+                    with self.assertRaises(AuthError) as ctx_err:
+                        client.generate_suggestions(ctx, cwd=str(proj), mode="analyze")
+            self.assertIn("privacy", str(ctx_err.exception).lower())
+            self.assertIn("privacy", load_state(cue_home)["last_ai_error"].lower())
+
+            self.assertFalse(_daemon_matches_current({"version": "0.0.1", "plugin_dir": str(ROOT)}))
 
 
 if __name__ == "__main__":

@@ -18,11 +18,14 @@ DEFAULT_MODEL_CACHE_TTL = 6 * 3600  # 6 hours
 
 DEFAULT_FREE_MODELS = [
     "openrouter/free",
-    "google/gemma-3-12b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
     "qwen/qwen3-coder:free",
     "mistralai/mistral-small-3.1-24b-instruct:free",
-    "google/gemma-3-27b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "google/gemma-3-27b-it:free",
+    "google/gemma-3-12b-it:free",
     "qwen/qwen3-14b:free",
     "deepseek/deepseek-r1-0528:free",
 ]
@@ -30,6 +33,7 @@ DEFAULT_FREE_MODELS = [
 DEFAULT_CONFIG: dict[str, Any] = {
     "version": 1,
     "openrouter_api_key": "",
+    "ai_suggestions_enabled": False,
     "preferred_model": "openrouter/free",
     "free_models_only": True,
     "auto_analyze": True,
@@ -219,6 +223,8 @@ def load_state(home: Path | None = None) -> dict[str, Any]:
         "active_model": raw.get("active_model", DEFAULT_FREE_MODELS[0]),
         "last_switch_reason": raw.get("last_switch_reason", ""),
         "last_switch_at": raw.get("last_switch_at", 0),
+        "last_ai_error": raw.get("last_ai_error", ""),
+        "last_ai_error_at": raw.get("last_ai_error_at", 0),
         "total_ai_calls": raw.get("total_ai_calls", 0),
         "total_fallbacks": raw.get("total_fallbacks", 0),
     }
