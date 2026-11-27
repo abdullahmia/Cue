@@ -142,6 +142,7 @@
 
       <nav class="hidden md:flex items-center gap-7 text-sm text-slate-300">
         <a href="#demo" class="hover:text-cyan-300 transition-colors">Interactive Demo</a>
+        <a href="#providers" class="hover:text-cyan-300 transition-colors">AI Providers</a>
         <a href="#install" class="hover:text-cyan-300 transition-colors">Installation</a>
         <a href="#screenshots" class="hover:text-cyan-300 transition-colors">Screenshots</a>
         <a href="#commands" class="hover:text-cyan-300 transition-colors">Commands</a>
@@ -286,19 +287,122 @@
           <p class="text-sm text-slate-400 leading-relaxed">When a command fails, <span class="font-mono text-white">cue</span> shows a dimmed fix ghost right away. Press <kbd class="px-1 bg-white/10 rounded text-xs font-mono">Tab</kbd> to fix, then <kbd class="px-1 bg-white/10 rounded text-xs font-mono">Tab</kbd> again to retry your original command.</p>
         </div>
       </div>
+    </section>
 
-      <!-- Supported AI Platforms Strip -->
-      <div class="mt-5 rounded-2xl border border-white/10 bg-[#161b22]/75 px-5 py-4">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div class="text-xs font-mono uppercase tracking-wider text-cyan-300 shrink-0">Supported AI Platforms</div>
-          <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
-            <span class="px-2.5 py-1 rounded-md bg-cyan-500/10 border border-cyan-400/25 text-cyan-200">OpenRouter (:free)</span>
-            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">OpenAI (ChatGPT)</span>
-            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">Google Gemini</span>
-            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">Anthropic (Claude)</span>
-            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">Groq</span>
-            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-slate-200">DeepSeek</span>
-            <span class="px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-400/25 text-emerald-200">Ollama (Local)</span>
+    <!-- Multi-Provider AI Showcase -->
+    <section id="providers" class="max-w-6xl mx-auto px-4 sm:px-6 py-12 reveal">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+        <div class="max-w-2xl">
+          <span class="text-xs font-mono uppercase tracking-widest text-cyan-300">Bring Your Own Key or Run Locally</span>
+          <h2 class="text-2xl sm:text-4xl font-bold text-white mt-2">Multiple AI Providers, One Unified Setup</h2>
+          <p class="text-slate-400 mt-2.5 text-sm sm:text-base">Use free OpenRouter models, connect your OpenAI ChatGPT, Google Gemini, Anthropic Claude, Groq, or DeepSeek API keys, or stay 100% offline with local Ollama. Configure multiple keys and <span class="font-mono text-white">cue</span> automatically switches models or providers on rate limits.</p>
+        </div>
+        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-400/25 text-xs font-mono text-emerald-300 shrink-0 self-start md:self-auto">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          Auto Model &amp; Provider Fallback
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="min-w-0 rounded-2xl border border-cyan-400/30 bg-[#161b22] p-4 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">OpenRouter</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-400/30">:free enforced</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Strict <code class="text-cyan-300 font-mono">:free</code> model filter with <code class="text-slate-300 font-mono">openrouter/free</code> auto-router, Gemma 4, Qwen3 Coder, &amp; Llama 3.3.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Env: <span class="text-slate-200">OPENROUTER_API_KEY</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-4 hover:border-cyan-400/35 transition-colors flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">OpenAI (ChatGPT)</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/5 text-slate-300 border border-white/10">gpt / o-series</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Supports <code class="text-slate-200 font-mono">gpt-4o-mini</code>, <code class="text-slate-200 font-mono">gpt-4.1-mini</code>, <code class="text-slate-200 font-mono">gpt-4o</code>, and reasoning models like <code class="text-slate-200 font-mono">o4-mini</code>.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Env: <span class="text-slate-200">OPENAI_API_KEY</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-4 hover:border-cyan-400/35 transition-colors flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">Google Gemini</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/5 text-slate-300 border border-white/10">Native API</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Direct Google AI Studio REST integration for <code class="text-slate-200 font-mono">gemini-2.5-flash</code>, <code class="text-slate-200 font-mono">flash-lite</code>, and <code class="text-slate-200 font-mono">2.5-pro</code>.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Env: <span class="text-slate-200">GEMINI_API_KEY</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-4 hover:border-cyan-400/35 transition-colors flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">Anthropic (Claude)</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/5 text-slate-300 border border-white/10">Messages API</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Native Claude integration for <code class="text-slate-200 font-mono">claude-haiku-4-5</code>, <code class="text-slate-200 font-mono">sonnet-4-5</code>, and <code class="text-slate-200 font-mono">3.5-haiku</code>.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Env: <span class="text-slate-200">ANTHROPIC_API_KEY</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-4 hover:border-cyan-400/35 transition-colors flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">Groq</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/5 text-slate-300 border border-white/10">Ultra-fast</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Low-latency inference for <code class="text-slate-200 font-mono">llama-3.3-70b-versatile</code>, <code class="text-slate-200 font-mono">llama-3.1-8b</code>, &amp; <code class="text-slate-200 font-mono">qwen3-32b</code>.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Env: <span class="text-slate-200">GROQ_API_KEY</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-white/10 bg-[#161b22] p-4 hover:border-cyan-400/35 transition-colors flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">DeepSeek</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-white/5 text-slate-300 border border-white/10">V3 &amp; R1</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Supports <code class="text-slate-200 font-mono">deepseek-chat</code> &amp; <code class="text-slate-200 font-mono">deepseek-reasoner</code> with automatic JSON recovery.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Env: <span class="text-slate-200">DEEPSEEK_API_KEY</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-emerald-400/30 bg-[#161b22] p-4 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">Ollama (Local)</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-400/30">Offline / No Key</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Discovers your pulled local models via <code class="text-emerald-300 font-mono">/api/tags</code> with zero API key needed.</p>
+          </div>
+          <div class="text-[11px] font-mono text-slate-400 border-t border-white/5 pt-2.5 truncate">Host: <span class="text-slate-200">OLLAMA_HOST</span></div>
+        </div>
+
+        <div class="min-w-0 rounded-2xl border border-dashed border-white/20 bg-[#12171e] p-4 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h3 class="font-semibold text-white text-sm">Cross-Provider Fallback</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-400/30">Automatic</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed mb-3">Add multiple provider keys inside <code class="text-cyan-300 font-mono">cue settings</code>. When one hits <code class="text-slate-200 font-mono">429</code>, cue keeps going on the next provider.</p>
+          </div>
+          <div class="text-[11px] font-mono text-cyan-300 border-t border-white/5 pt-2.5 truncate">Toggle: Auto Fallback</div>
+        </div>
+      </div>
+
+      <!-- Quick Provider CLI Commands Bar -->
+      <div class="rounded-2xl border border-white/10 bg-[#161b22] p-4 sm:p-5">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Switch Providers from TUI or CLI</h3>
+            <p class="text-xs text-slate-400 mt-0.5">All AI settings live inside <code class="text-cyan-300 font-mono">cue settings</code>, or pass flags directly with <code class="text-cyan-300 font-mono">--provider</code>.</p>
+          </div>
+          <div class="bg-[#0d1117] border border-white/10 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 min-w-0 lg:min-w-[500px]">
+            <code id="code-providers-cli" class="font-mono text-xs text-emerald-300 overflow-x-auto whitespace-nowrap">cue settings --ai on --provider gemini &amp;&amp; cue token -p gemini AIza...</code>
+            <button data-copy-target="code-providers-cli" class="copy-btn shrink-0 px-2.5 py-1 rounded-md text-xs font-medium bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-slate-200 transition-colors">Copy</button>
           </div>
         </div>
       </div>
@@ -649,6 +753,7 @@ cd $HOME\cue
       </div>
       <div class="flex items-center gap-5">
         <a href="https://github.com/abdullahmia/Cue" target="_blank" rel="noreferrer" class="hover:text-white transition-colors">GitHub</a>
+        <a href="#providers" class="hover:text-white transition-colors">AI Providers</a>
         <a href="#install" class="hover:text-white transition-colors">Install</a>
         <a href="#screenshots" class="hover:text-white transition-colors">Screenshots</a>
       </div>
